@@ -14,8 +14,31 @@ const MIN_LIQUIDITY_SOL = 10;
 let startBalance = 0;
 let isRunning = true;
 let positions = {};
+let walletAverages = {};
 
 async function getBalance() { const b = await connection.getBalance(wallet.publicKey); return b / 1e9; }
+
+async function calculateWalletAverage(walletAddress) {
+try {
+console.log("Calcul moyenne achats pour:", walletAddress);
+const pubkey = new PublicKey(walletAddress);
+const signatures = await connection.getSignaturesForAddress(pubkey, {limit: 30});
+let totalSOL = 0;
+let buyCount = 0;
+for (const sig of signatures) {
+const tx = await connection.getTransaction(sig.signature, {maxSupportedTransactionVersion: 0});
+if (!tx || !tx.meta) continue;
+const solChange = (tx.meta.preBalances[0] - tx.meta.postBalances[0]) / 1e9;
+if (solChange > 0.01) {
+totalSOL += solChange;
+buyCount++;
+}
+}
+const average = buyCount > 0 ? totalSOL / buyCount : 0.5;
+console.log("Moyenne achats", walletAddress.slice(0,8) + "...", ":", average.toFixed(3), "SOL sur", buyCount, "trades");
+return average;
+} catch(e) { console.error("Erreur calcul moyenne:", e.message); return 0.5; }
+}
 
 async function checkLiquidity(mint) {
 try {
@@ -61,14 +84,19 @@ async function analyzeTransaction(signature) {
 try {
 const tx = await connection.getTransaction(signature, {maxSupportedTransactionVersion: 0});
 if (!tx || !tx.meta) return null;
+const solSpent = (tx.meta.preBalances[0] - tx.meta.postBalances[0]) / 1e9;
 const preBalances = tx.meta.preTokenBalances || [];
 const postBalances = tx.meta.postTokenBalances || [];
 for (const post of postBalances) {
 const pre = preBalances.find(p => p.mint === post.mint && p.accountIndex === post.accountIndex);
 const preAmount = pre ? parseFloat(pre.uiTokenAmount.uiAmount || 0) : 0;
 const postAmount = parseFloat(post.uiTokenAmount.uiAmount || 0);
-if (postAmount > preAmount && post.mint !== SOL_MINT) { return { action: "buy", mint: post.mint }; }
-if (postAmount < preAmount && post.mint !== SOL_MINT) { return { action: "sell", mint: post.mint }; }
+if (postAmount > preAmount && post.mint !== SOL_MINT) {
+return { action: "buy", mint: post.mint, solAmount: solSpent };
+}
+if (postAmount < preAmount && post.mint !== SOL_MINT) {
+return { action: "sell", mint: post.mint, solAmount: 0 };
+}
 }
 return null;
 } catch(e) { console.error("Analyse erreur:", e.message); return null; }
@@ -81,7 +109,7 @@ const pos = positions[mint];
 const quote = await fetch("https://quote-api.jup.ag/v6/quote?inputMint=" + mint + "&outputMint=" + SOL_MINT + "&amount=" + pos.tokenAmount + "&slippageBps=300").then(r => r.json());
 if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
-const roi = (currentValueSOL / pos.buyAmountSOL);
+const roi = currentValueSOL / pos.buyAmountSOL;
 if (roi >= 5) {
 console.log("Take profit 5x! Vente totale");
 await swapToken(mint, SOL_MINT, pos.tokenAmount);
@@ -99,6 +127,7 @@ async function monitorWallet(walletAddress) {
 console.log("Monitoring:", walletAddress);
 const pubkey = new PublicKey(walletAddress);
 let lastSig = null;
+const average = walletAverages[walletAddress] || 0.5;
 setInterval(async () => {
 if (!isRunning) return;
 try {
@@ -113,10 +142,16 @@ if (pnl >= DAILY_TARGET) { console.log("Objectif atteint!", pnl.toFixed(2) + "%"
 }
 const tradeInfo = await analyzeTransaction(sigs[0].signature);
 if (!tradeInfo) return;
-console.log("Trade detecte:", tradeInfo.action, tradeInfo.mint);
-if (tradeInfo.action === "buy" && !positions[tradeInfo.mint]) {
+if (tradeInfo.action === "buy") {
+const threshold = average * 1.5;
+if (tradeInfo.solAmount < threshold) {
+console.log("Achat ignore - montant", tradeInfo.solAmount.toFixed(3), "SOL < seuil", threshold.toFixed(3), "SOL");
+return;
+}
+console.log("Signal fort detecte!", tradeInfo.solAmount.toFixed(3), "SOL (seuil:", threshold.toFixed(3), ")");
+if (positions[tradeInfo.mint]) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
-if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, trade ignore"); return; }
+if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
 console.log("Achat en cours:", tradeInfo.mint);
 const amountLamports = Math.floor(TRADE_AMOUNT * 1e9);
 const txid = await swapToken(SOL_MINT, tradeInfo.mint, amountLamports);
@@ -143,11 +178,14 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version optimisee");
+console.log("Bot demarre - Version optimisee v2");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade amount: 0.15 SOL | Min liquidite: 10 SOL");
+console.log("Trade amount: 0.15 SOL | Min liquidite: 10 SOL | Filtre moyenne: 1.5x");
+for (const w of WALLETS_TO_TRACK) {
+walletAverages[w.trim()] = await calculateWalletAverage(w.trim());
+}
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w.trim()); }
 console.log("Bot en ecoute...");
 }
