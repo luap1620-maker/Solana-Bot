@@ -12,6 +12,7 @@ const TRADE_AMOUNT_SMALL = 0.10;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
 const POSITION_STOP_LOSS = 0.50;
+const MIN_TRADE_SOL = 0.05;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const POSITIONS_FILE = "positions.json";
 let startBalance = 0;
@@ -37,13 +38,13 @@ async function getBalance() { const b = await connection.getBalance(wallet.publi
 async function getDynamicSlippage(mint) {
 try {
 const res = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=150000000&slippageBps=1000").then(r => r.json());
-if (!res || res.error) return 300;
+if (!res || res.error) return 500;
 const impact = parseFloat(res.priceImpactPct || 1);
-if (impact < 1) return 100;
-if (impact < 3) return 300;
-if (impact < 5) return 500;
-return 1000;
-} catch(e) { return 300; }
+if (impact < 1) return 300;
+if (impact < 3) return 500;
+if (impact < 5) return 1000;
+return 1500;
+} catch(e) { return 500; }
 }
 
 async function swapToken(inputMint, outputMint, amount) {
@@ -139,6 +140,10 @@ if (pnl >= DAILY_TARGET) { console.log("Objectif journalier atteint!", pnl.toFix
 const tradeInfo = await analyzeTransaction(sigs[0].signature);
 if (!tradeInfo) return;
 if (tradeInfo.action === "buy") {
+if (tradeInfo.solAmount < MIN_TRADE_SOL) {
+console.log("Ignore - trop petit:", tradeInfo.solAmount.toFixed(4), "SOL < 0.05 SOL");
+return;
+}
 if (positions[tradeInfo.mint]) { console.log("Position existante sur " + tradeInfo.mint.slice(0,8) + "... ignore"); return; }
 if (tradeInfo.solAmount >= 0.5) {
 console.log("Signal fort! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.15 SOL");
@@ -178,13 +183,13 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v15");
+console.log("Bot demarre - Version finale v16");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.15 SOL (>0.5) / 0.10 SOL (<0.5) | SL: -50% | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 4 | RPC: Helius | Positions sauvegardees");
+console.log("Trade: 0.15 SOL (>0.5) / 0.10 SOL (<0.5) | Min: 0.05 SOL | SL: -50% | TP: 2x=50% 5x=80%");
+console.log("Wallets tracked: 4 | RPC: Helius | Slippage: dynamique ameliore");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
