@@ -5,7 +5,7 @@ const fetch = require("node-fetch");
 
 const connection = new Connection("https://solemn-radial-putty.solana-mainnet.quiknode.pro/cd42ac6fe3a3e34e390b754cc8a6c1e3dfa516a8/", "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","HfN9JFxwS89fERT8of2dt1it6G3P2ia5sJc5J8GkwU5k","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA"];
+const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA"];
 const TRADE_AMOUNT_NORMAL = 0.15;
 const TRADE_AMOUNT_SMALL = 0.10;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
@@ -15,12 +15,6 @@ const MIN_LIQUIDITY_SOL = 5;
 let startBalance = 0;
 let isRunning = true;
 let positions = {};
-const walletAverages = {
-"65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE": 1.859,
-"4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk": 1.145,
-"HfN9JFxwS89fERT8of2dt1it6G3P2ia5sJc5J8GkwU5k": 1.660,
-"FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA": 1.832
-};
 
 async function getBalance() { const b = await connection.getBalance(wallet.publicKey); return b / 1e9; }
 
@@ -108,7 +102,6 @@ async function monitorWallet(walletAddress) {
 console.log("Monitoring:", walletAddress);
 const pubkey = new PublicKey(walletAddress);
 let lastSig = null;
-const average = walletAverages[walletAddress] || 1.0;
 setInterval(async () => {
 if (!isRunning) return;
 try {
@@ -124,16 +117,10 @@ if (pnl >= DAILY_TARGET) { console.log("Objectif journalier atteint!", pnl.toFix
 const tradeInfo = await analyzeTransaction(sigs[0].signature);
 if (!tradeInfo) return;
 if (tradeInfo.action === "buy") {
-const highThreshold = average * 1.5;
-const lowThreshold = average * 0.8;
-if (tradeInfo.solAmount < lowThreshold) {
-console.log("Ignore - montant", tradeInfo.solAmount.toFixed(3), "< seuil min", lowThreshold.toFixed(3));
-return;
-}
 if (positions[tradeInfo.mint]) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
 if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
-if (tradeInfo.solAmount >= highThreshold) {
+if (tradeInfo.solAmount >= 0.5) {
 console.log("Signal fort! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.15 SOL");
 const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_NORMAL * 1e9));
 if (txid) {
@@ -167,12 +154,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v8");
+console.log("Bot demarre - Version finale v10");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.15 SOL fort / 0.10 SOL moyen | Liquidite: 5 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 4 | RPC: QuickNode | Check: 3s | Moyennes: fixes");
+console.log("Trade: 0.15 SOL (>0.5 SOL) / 0.10 SOL (<0.5 SOL) | Liquidite: 5 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
+console.log("Wallets tracked: 3 | RPC: QuickNode | Check: 3s");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
