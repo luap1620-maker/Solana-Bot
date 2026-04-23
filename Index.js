@@ -5,7 +5,7 @@ const fetch = require("node-fetch");
 
 const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","Gq4KiPGKgZEKh1DHcmc5xEwDm5FgdcKQKiWw15QQCgYj","HfN9JFxwS89fERT8of2dt1it6G3P2ia5sJc5J8GkwU5k","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA"];
+const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","HfN9JFxwS89fERT8of2dt1it6G3P2ia5sJc5J8GkwU5k","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA"];
 const TRADE_AMOUNT = 0.15;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
@@ -170,12 +170,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v2");
+console.log("Bot demarre - Version finale v3");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
 console.log("Trade: 0.15 SOL | Liquidite: 10 SOL | Seuil: 1.5x | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 5");
+console.log("Wallets tracked: 4");
 for (const w of WALLETS_TO_TRACK) { walletAverages[w] = await calculateWalletAverage(w); }
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
