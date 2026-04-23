@@ -177,16 +177,16 @@ delete positions[tradeInfo.mint];
 }
 for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 } catch(e) { console.error("Erreur:", e.message); }
-}, 1000);
+}, 3000);
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v4");
+console.log("Bot demarre - Version finale v5");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
 console.log("Trade: 0.15 SOL (fort) / 0.10 SOL (moyen) | Liquidite: 5 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 4");
+console.log("Wallets tracked: 4 | Verification: 3 secondes");
 for (const w of WALLETS_TO_TRACK) { walletAverages[w] = await calculateWalletAverage(w); }
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
