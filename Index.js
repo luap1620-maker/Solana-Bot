@@ -19,7 +19,7 @@ async function getBalance() { const b = await connection.getBalance(wallet.publi
 
 async function getDynamicSlippage(mint) {
 try {
-const res = await fetch("https://quote-api.jup.ag/v6/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=150000000&slippageBps=1000").then(r => r.json());
+const res = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=150000000&slippageBps=1000").then(r => r.json());
 if (!res || res.error) return 300;
 const impact = parseFloat(res.priceImpactPct || 1);
 if (impact < 1) return 100;
@@ -32,13 +32,13 @@ return 1000;
 async function swapToken(inputMint, outputMint, amount) {
 try {
 const slippage = await getDynamicSlippage(outputMint === SOL_MINT ? inputMint : outputMint);
-const quote = await fetch("https://quote-api.jup.ag/v6/quote?inputMint=" + inputMint + "&outputMint=" + outputMint + "&amount=" + amount + "&slippageBps=" + slippage).then(r => r.json());
-if (!quote || quote.error) { console.log("Quote erreur"); return; }
-const swapRes = await fetch("https://quote-api.jup.ag/v6/swap", {
+const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + inputMint + "&outputMint=" + outputMint + "&amount=" + amount + "&slippageBps=" + slippage).then(r => r.json());
+if (!quote || quote.error) { console.log("Quote erreur:", quote); return; }
+const swapRes = await fetch("https://api.jup.ag/swap/v1/swap", {
 method: "POST", headers: {"Content-Type": "application/json"},
 body: JSON.stringify({quoteResponse: quote, userPublicKey: wallet.publicKey.toString(), wrapAndUnwrapSol: true})
 }).then(r => r.json());
-if (!swapRes.swapTransaction) { console.log("Swap erreur"); return; }
+if (!swapRes.swapTransaction) { console.log("Swap erreur:", swapRes); return; }
 const swapTx = VersionedTransaction.deserialize(Buffer.from(swapRes.swapTransaction, "base64"));
 swapTx.sign([wallet]);
 const txid = await connection.sendRawTransaction(swapTx.serialize());
@@ -69,7 +69,7 @@ async function checkTakeProfit(mint) {
 try {
 if (!positions[mint]) return;
 const pos = positions[mint];
-const quote = await fetch("https://quote-api.jup.ag/v6/quote?inputMint=" + mint + "&outputMint=" + SOL_MINT + "&amount=" + pos.tokenAmount + "&slippageBps=300").then(r => r.json());
+const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + mint + "&outputMint=" + SOL_MINT + "&amount=" + pos.tokenAmount + "&slippageBps=300").then(r => r.json());
 if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
 const roi = currentValueSOL / pos.buyAmountSOL;
@@ -141,12 +141,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v12");
+console.log("Bot demarre - Version finale v13");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
 console.log("Trade: 0.15 SOL (>0.5 SOL) / 0.10 SOL (<0.5 SOL) | Sans filtre liquidite | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 4 | RPC: Helius | Check: 3s");
+console.log("Wallets tracked: 4 | RPC: Helius | Jupiter: api.jup.ag");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
