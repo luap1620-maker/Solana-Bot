@@ -5,28 +5,17 @@ const fetch = require("node-fetch");
 
 const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA"];
+const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA","HfN9JFxwS89fERT8of2dt1it6G3P2ia5sJc5J8GkwU5k"];
 const TRADE_AMOUNT_NORMAL = 0.15;
 const TRADE_AMOUNT_SMALL = 0.10;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const MIN_LIQUIDITY_SOL = 2;
 let startBalance = 0;
 let isRunning = true;
 let positions = {};
 
 async function getBalance() { const b = await connection.getBalance(wallet.publicKey); return b / 1e9; }
-
-async function checkLiquidity(mint) {
-try {
-const res = await fetch("https://quote-api.jup.ag/v6/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=1000000000&slippageBps=1000").then(r => r.json());
-if (!res || res.error) return 0;
-const priceImpact = parseFloat(res.priceImpactPct || 100);
-if (priceImpact > 5) return 0;
-return MIN_LIQUIDITY_SOL + 1;
-} catch(e) { return 0; }
-}
 
 async function getDynamicSlippage(mint) {
 try {
@@ -118,8 +107,6 @@ const tradeInfo = await analyzeTransaction(sigs[0].signature);
 if (!tradeInfo) return;
 if (tradeInfo.action === "buy") {
 if (positions[tradeInfo.mint]) return;
-const liquidity = await checkLiquidity(tradeInfo.mint);
-if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
 if (tradeInfo.solAmount >= 0.5) {
 console.log("Signal fort! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.15 SOL");
 const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_NORMAL * 1e9));
@@ -154,12 +141,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v11");
+console.log("Bot demarre - Version finale v12");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.15 SOL (>0.5 SOL) / 0.10 SOL (<0.5 SOL) | Liquidite: 2 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 3 | RPC: Helius | Check: 3s");
+console.log("Trade: 0.15 SOL (>0.5 SOL) / 0.10 SOL (<0.5 SOL) | Sans filtre liquidite | TP: 2x=50% 5x=80% | Daily: 50%");
+console.log("Wallets tracked: 4 | RPC: Helius | Check: 3s");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
