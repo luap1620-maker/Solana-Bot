@@ -5,7 +5,7 @@ const fetch = require("node-fetch");
 
 const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-const WALLETS_TO_TRACK = process.env.WALLETS_TO_TRACK.split(",");
+const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","4xM5t84MsqMwPCA2goEzaaMywQZi6hAbMu8n7LZApppi"];
 const TRADE_AMOUNT = 0.15;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = parseFloat(process.env.DAILY_PROFIT_TARGET) || 30;
@@ -29,15 +29,12 @@ for (const sig of signatures) {
 const tx = await connection.getTransaction(sig.signature, {maxSupportedTransactionVersion: 0});
 if (!tx || !tx.meta) continue;
 const solChange = (tx.meta.preBalances[0] - tx.meta.postBalances[0]) / 1e9;
-if (solChange > 0.01) {
-totalSOL += solChange;
-buyCount++;
-}
+if (solChange > 0.01) { totalSOL += solChange; buyCount++; }
 }
 const average = buyCount > 0 ? totalSOL / buyCount : 0.5;
-console.log("Moyenne achats", walletAddress.slice(0,8) + "...", ":", average.toFixed(3), "SOL sur", buyCount, "trades");
+console.log("Moyenne", walletAddress.slice(0,8) + "...", ":", average.toFixed(3), "SOL sur", buyCount, "trades");
 return average;
-} catch(e) { console.error("Erreur calcul moyenne:", e.message); return 0.5; }
+} catch(e) { console.error("Erreur moyenne:", e.message); return 0.5; }
 }
 
 async function checkLiquidity(mint) {
@@ -91,12 +88,8 @@ for (const post of postBalances) {
 const pre = preBalances.find(p => p.mint === post.mint && p.accountIndex === post.accountIndex);
 const preAmount = pre ? parseFloat(pre.uiTokenAmount.uiAmount || 0) : 0;
 const postAmount = parseFloat(post.uiTokenAmount.uiAmount || 0);
-if (postAmount > preAmount && post.mint !== SOL_MINT) {
-return { action: "buy", mint: post.mint, solAmount: solSpent };
-}
-if (postAmount < preAmount && post.mint !== SOL_MINT) {
-return { action: "sell", mint: post.mint, solAmount: 0 };
-}
+if (postAmount > preAmount && post.mint !== SOL_MINT) { return { action: "buy", mint: post.mint, solAmount: solSpent }; }
+if (postAmount < preAmount && post.mint !== SOL_MINT) { return { action: "sell", mint: post.mint, solAmount: 0 }; }
 }
 return null;
 } catch(e) { console.error("Analyse erreur:", e.message); return null; }
@@ -145,14 +138,13 @@ if (!tradeInfo) return;
 if (tradeInfo.action === "buy") {
 const threshold = average * 1.5;
 if (tradeInfo.solAmount < threshold) {
-console.log("Achat ignore - montant", tradeInfo.solAmount.toFixed(3), "SOL < seuil", threshold.toFixed(3), "SOL");
+console.log("Ignore - montant", tradeInfo.solAmount.toFixed(3), "< seuil", threshold.toFixed(3));
 return;
 }
-console.log("Signal fort detecte!", tradeInfo.solAmount.toFixed(3), "SOL (seuil:", threshold.toFixed(3), ")");
+console.log("Signal fort!", tradeInfo.solAmount.toFixed(3), "SOL");
 if (positions[tradeInfo.mint]) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
 if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
-console.log("Achat en cours:", tradeInfo.mint);
 const amountLamports = Math.floor(TRADE_AMOUNT * 1e9);
 const txid = await swapToken(SOL_MINT, tradeInfo.mint, amountLamports);
 if (txid) {
@@ -162,7 +154,6 @@ positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TR
 }
 }
 if (tradeInfo.action === "sell" && positions[tradeInfo.mint]) {
-console.log("Vente en cours:", tradeInfo.mint);
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
 if (tokenAccounts.value.length > 0) {
 const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
@@ -178,15 +169,13 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version optimisee v2");
+console.log("Bot demarre - Version optimisee v3");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade amount: 0.15 SOL | Min liquidite: 10 SOL | Filtre moyenne: 1.5x");
-for (const w of WALLETS_TO_TRACK) {
-walletAverages[w.trim()] = await calculateWalletAverage(w.trim());
-}
-for (const w of WALLETS_TO_TRACK) { await monitorWallet(w.trim()); }
+console.log("Trade: 0.15 SOL | Liquidite min: 10 SOL | Seuil: 1.5x moyenne");
+for (const w of WALLETS_TO_TRACK) { walletAverages[w] = await calculateWalletAverage(w); }
+for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
 
