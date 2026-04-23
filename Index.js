@@ -147,4 +147,49 @@ return;
 if (positions[tradeInfo.mint]) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
 if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
-if (tradeInfo.solAmount >=​​​​​​​​​​​​​​​​
+if (tradeInfo.solAmount >= highThreshold) {
+console.log("Signal fort! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.15 SOL");
+const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_NORMAL * 1e9));
+if (txid) {
+const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
+const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
+positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT_NORMAL, tokenAmount: tokenAmount, halfSold: false, bigSold: false };
+}
+} else {
+console.log("Signal moyen! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.10 SOL");
+const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_SMALL * 1e9));
+if (txid) {
+const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
+const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
+positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT_SMALL, tokenAmount: tokenAmount, halfSold: false, bigSold: false };
+}
+}
+}
+if (tradeInfo.action === "sell" && positions[tradeInfo.mint]) {
+const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
+if (tokenAccounts.value.length > 0) {
+const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
+if (parseInt(tokenBalance) > 0) {
+await swapToken(tradeInfo.mint, SOL_MINT, tokenBalance);
+delete positions[tradeInfo.mint];
+}
+}
+}
+for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
+} catch(e) { console.error("Erreur:", e.message); }
+}, 3000);
+}
+
+async function main() {
+console.log("Bot demarre - Version finale v7");
+console.log("Wallet:", wallet.publicKey.toString());
+startBalance = await getBalance();
+console.log("Balance:", startBalance, "SOL");
+console.log("Trade: 0.15 SOL fort / 0.10 SOL moyen | Liquidite: 5 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
+console.log("Wallets tracked: 4 | RPC: QuickNode | Check: 3s");
+for (const w of WALLETS_TO_TRACK) { walletAverages[w] = await calculateWalletAverage(w); }
+for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
+console.log("Bot en ecoute...");
+}
+
+main().catch(console.error);
