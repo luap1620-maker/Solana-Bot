@@ -6,11 +6,12 @@ const fetch = require("node-fetch");
 const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
 const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","HfN9JFxwS89fERT8of2dt1it6G3P2ia5sJc5J8GkwU5k","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA"];
-const TRADE_AMOUNT = 0.15;
+const TRADE_AMOUNT_NORMAL = 0.15;
+const TRADE_AMOUNT_SMALL = 0.10;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const MIN_LIQUIDITY_SOL = 10;
+const MIN_LIQUIDITY_SOL = 5;
 let startBalance = 0;
 let isRunning = true;
 let positions = {};
@@ -137,21 +138,31 @@ if (pnl >= DAILY_TARGET) { console.log("Objectif journalier atteint!", pnl.toFix
 const tradeInfo = await analyzeTransaction(sigs[0].signature);
 if (!tradeInfo) return;
 if (tradeInfo.action === "buy") {
-const threshold = average * 1.5;
-if (tradeInfo.solAmount < threshold) {
-console.log("Ignore - montant", tradeInfo.solAmount.toFixed(3), "< seuil", threshold.toFixed(3));
+const highThreshold = average * 1.5;
+const lowThreshold = average * 0.8;
+if (tradeInfo.solAmount < lowThreshold) {
+console.log("Ignore - montant", tradeInfo.solAmount.toFixed(3), "< seuil min", lowThreshold.toFixed(3));
 return;
 }
-console.log("Signal fort!", tradeInfo.solAmount.toFixed(3), "SOL");
 if (positions[tradeInfo.mint]) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
 if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
-const amountLamports = Math.floor(TRADE_AMOUNT * 1e9);
-const txid = await swapToken(SOL_MINT, tradeInfo.mint, amountLamports);
+if (tradeInfo.solAmount >= highThreshold) {
+console.log("Signal fort! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.15 SOL");
+const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_NORMAL * 1e9));
 if (txid) {
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
 const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
-positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT, tokenAmount: tokenAmount, halfSold: false, bigSold: false };
+positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT_NORMAL, tokenAmount: tokenAmount, halfSold: false, bigSold: false };
+}
+} else {
+console.log("Signal moyen! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.10 SOL");
+const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_SMALL * 1e9));
+if (txid) {
+const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
+const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
+positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT_SMALL, tokenAmount: tokenAmount, halfSold: false, bigSold: false };
+}
 }
 }
 if (tradeInfo.action === "sell" && positions[tradeInfo.mint]) {
@@ -170,11 +181,11 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v3");
+console.log("Bot demarre - Version finale v4");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.15 SOL | Liquidite: 10 SOL | Seuil: 1.5x | TP: 2x=50% 5x=80% | Daily: 50%");
+console.log("Trade: 0.15 SOL (fort) / 0.10 SOL (moyen) | Liquidite: 5 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
 console.log("Wallets tracked: 4");
 for (const w of WALLETS_TO_TRACK) { walletAverages[w] = await calculateWalletAverage(w); }
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
