@@ -3,7 +3,7 @@ const { Connection, PublicKey, Keypair, VersionedTransaction } = require("@solan
 const bs58 = require("bs58");
 const fetch = require("node-fetch");
 
-const connection = new Connection("https://solemn-radial-putty.solana-mainnet.quiknode.pro/cd42ac6fe3a3e34e390b754cc8a6c1e3dfa516a8/", "confirmed");
+const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
 const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk","FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA"];
 const TRADE_AMOUNT_NORMAL = 0.15;
@@ -11,7 +11,7 @@ const TRADE_AMOUNT_SMALL = 0.10;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
-const MIN_LIQUIDITY_SOL = 5;
+const MIN_LIQUIDITY_SOL = 2;
 let startBalance = 0;
 let isRunning = true;
 let positions = {};
@@ -154,12 +154,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v10");
+console.log("Bot demarre - Version finale v11");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.15 SOL (>0.5 SOL) / 0.10 SOL (<0.5 SOL) | Liquidite: 5 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 3 | RPC: QuickNode | Check: 3s");
+console.log("Trade: 0.15 SOL (>0.5 SOL) / 0.10 SOL (<0.5 SOL) | Liquidite: 2 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
+console.log("Wallets tracked: 3 | RPC: Helius | Check: 3s");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
