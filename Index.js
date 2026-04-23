@@ -10,6 +10,7 @@ const TRADE_AMOUNT_NORMAL = 0.15;
 const TRADE_AMOUNT_SMALL = 0.10;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
+const POSITION_STOP_LOSS = 0.50;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 let startBalance = 0;
 let isRunning = true;
@@ -73,7 +74,17 @@ const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + mint +
 if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
 const roi = currentValueSOL / pos.buyAmountSOL;
-if (roi >= 5 && !pos.bigSold) {
+if (roi <= POSITION_STOP_LOSS) {
+console.log("Stop loss position! -50% sur " + mint.slice(0,8) + "... Vente totale");
+const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(mint)});
+if (tokenAccounts.value.length > 0) {
+const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
+if (parseInt(tokenBalance) > 0) {
+await swapToken(mint, SOL_MINT, tokenBalance);
+delete positions[mint];
+}
+}
+} else if (roi >= 5 && !pos.bigSold) {
 console.log("Take profit 5x! Vente 80%");
 const amount80 = Math.floor(parseInt(pos.tokenAmount) * 0.8).toString();
 await swapToken(mint, SOL_MINT, amount80);
@@ -108,7 +119,7 @@ if (!tradeInfo) return;
 if (tradeInfo.action === "buy") {
 if (positions[tradeInfo.mint]) return;
 if (tradeInfo.solAmount >= 0.5) {
-console.log("Signal fort! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.15 SOL");
+console.log("Signal fort! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.15 SOL");
 const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_NORMAL * 1e9));
 if (txid) {
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
@@ -116,7 +127,7 @@ const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].acco
 positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT_NORMAL, tokenAmount: tokenAmount, halfSold: false, bigSold: false };
 }
 } else {
-console.log("Signal moyen! " + tradeInfo.solAmount.toFixed(3) + " SOL -> achat 0.10 SOL");
+console.log("Signal moyen! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.10 SOL");
 const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_SMALL * 1e9));
 if (txid) {
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
@@ -126,6 +137,7 @@ positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TR
 }
 }
 if (tradeInfo.action === "sell" && positions[tradeInfo.mint]) {
+console.log("Vente detectee sur " + walletAddress.slice(0,8) + "... -> vente position");
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
 if (tokenAccounts.value.length > 0) {
 const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
@@ -141,11 +153,11 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v13");
+console.log("Bot demarre - Version finale v14");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.15 SOL (>0.5 SOL) / 0.10 SOL (<0.5 SOL) | Sans filtre liquidite | TP: 2x=50% 5x=80% | Daily: 50%");
+console.log("Trade: 0.15 SOL (>0.5) / 0.10 SOL (<0.5) | SL position: -50% | TP: 2x=50% 5x=80% | Daily: 50%");
 console.log("Wallets tracked: 4 | RPC: Helius | Jupiter: api.jup.ag");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
