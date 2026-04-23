@@ -15,28 +15,14 @@ const MIN_LIQUIDITY_SOL = 5;
 let startBalance = 0;
 let isRunning = true;
 let positions = {};
-let walletAverages = {};
+const walletAverages = {
+"65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE": 1.859,
+"4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk": 1.145,
+"HfN9JFxwS89fERT8of2dt1it6G3P2ia5sJc5J8GkwU5k": 1.660,
+"FHGL93a95byonJbk8PzZFhCNuxDwgqRwUXcUkdkfeMNA": 1.832
+};
 
 async function getBalance() { const b = await connection.getBalance(wallet.publicKey); return b / 1e9; }
-
-async function calculateWalletAverage(walletAddress) {
-try {
-console.log("Calcul moyenne achats pour:", walletAddress);
-const pubkey = new PublicKey(walletAddress);
-const signatures = await connection.getSignaturesForAddress(pubkey, {limit: 30});
-let totalSOL = 0;
-let buyCount = 0;
-for (const sig of signatures) {
-const tx = await connection.getTransaction(sig.signature, {maxSupportedTransactionVersion: 0});
-if (!tx || !tx.meta) continue;
-const solChange = (tx.meta.preBalances[0] - tx.meta.postBalances[0]) / 1e9;
-if (solChange > 0.01) { totalSOL += solChange; buyCount++; }
-}
-const average = buyCount > 0 ? totalSOL / buyCount : 0.5;
-console.log("Moyenne", walletAddress.slice(0,8) + "...", ":", average.toFixed(3), "SOL sur", buyCount, "trades");
-return average;
-} catch(e) { console.error("Erreur moyenne:", e.message); return 0.5; }
-}
 
 async function checkLiquidity(mint) {
 try {
@@ -122,7 +108,7 @@ async function monitorWallet(walletAddress) {
 console.log("Monitoring:", walletAddress);
 const pubkey = new PublicKey(walletAddress);
 let lastSig = null;
-const average = walletAverages[walletAddress] || 0.5;
+const average = walletAverages[walletAddress] || 1.0;
 setInterval(async () => {
 if (!isRunning) return;
 try {
@@ -181,13 +167,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v7");
+console.log("Bot demarre - Version finale v8");
 console.log("Wallet:", wallet.publicKey.toString());
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
 console.log("Trade: 0.15 SOL fort / 0.10 SOL moyen | Liquidite: 5 SOL | TP: 2x=50% 5x=80% | Daily: 50%");
-console.log("Wallets tracked: 4 | RPC: QuickNode | Check: 3s");
-for (const w of WALLETS_TO_TRACK) { walletAverages[w] = await calculateWalletAverage(w); }
+console.log("Wallets tracked: 4 | RPC: QuickNode | Check: 3s | Moyennes: fixes");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
