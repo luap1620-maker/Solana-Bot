@@ -11,7 +11,7 @@ const TRADE_AMOUNT = 0.10;
 const TRADE_AMOUNT_REBUY = 0.05;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
-const POSITION_STOP_LOSS = -0.50;
+const POSITION_STOP_LOSS = -0.40;
 const MIN_TRADE_SOL = 0.05;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const POSITIONS_FILE = "positions.json";
@@ -118,7 +118,7 @@ const totalValueSOL = currentValueSOL + pos.solRecovered;
 const globalRoi = (totalValueSOL - pos.buyAmountSOL) / pos.buyAmountSOL;
 console.log("Position " + mint.slice(0,8) + "... ROI: " + (globalRoi * 100).toFixed(0) + "% | Valeur: " + currentValueSOL.toFixed(4) + " SOL");
 if (globalRoi <= POSITION_STOP_LOSS && !pos.halfSold) {
-console.log("Stop loss -50% sur " + mint.slice(0,8) + "... Vente totale");
+console.log("Stop loss -40% sur " + mint.slice(0,8) + "... Vente totale");
 if (parseInt(currentTokenAmount) > 0) {
 await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
 delete positions[mint];
@@ -217,12 +217,12 @@ savePositions();
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v28");
+console.log("Bot demarre - Version finale v29");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL | SL: -50% | TP: +100%=70% | Retry: 3 | Check wallet: 7s | Check positions: 30s");
+console.log("Trade: 0.10 SOL | SL: -40% | TP: +100%=70% | Retry: 3 | Check wallet: 7s | Check positions: 30s");
 console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius | ROI correct");
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
