@@ -80,11 +80,22 @@ for (const post of postBalances) {
 const pre = preBalances.find(p => p.mint === post.mint && p.accountIndex === post.accountIndex);
 const preAmount = pre ? parseFloat(pre.uiTokenAmount.uiAmount || 0) : 0;
 const postAmount = parseFloat(post.uiTokenAmount.uiAmount || 0);
-if (postAmount > preAmount && post.mint !== SOL_MINT) { return { action: "buy", mint: post.mint, solAmount: solSpent }; }
+if (postAmount > preAmount && post.mint !== SOL_MINT) { return { action: "buy", mint: post.mint, solAmount: Math.abs(solSpent) }; }
 if (postAmount < preAmount && post.mint !== SOL_MINT) { return { action: "sell", mint: post.mint, solAmount: 0 }; }
 }
 return null;
 } catch(e) { console.error("Analyse erreur:", e.message); return null; }
+}
+
+async function getTokenBalance(mint) {
+try {
+await new Promise(r => setTimeout(r, 3000));
+const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(mint)});
+if (tokenAccounts.value.length > 0) {
+return tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
+}
+return "0";
+} catch(e) { return "0"; }
 }
 
 async function checkTakeProfit(mint) {
@@ -94,12 +105,18 @@ const pos = positions[mint];
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(mint)});
 if (!tokenAccounts.value.length) return;
 const currentTokenAmount = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
+if (parseInt(currentTokenAmount) === 0) {
+console.log("Position " + mint.slice(0,8) + "... solde 0 tokens — suppression");
+delete positions[mint];
+savePositions();
+return;
+}
 const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + mint + "&outputMint=" + SOL_MINT + "&amount=" + currentTokenAmount + "&slippageBps=300").then(r => r.json());
 if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
 const totalValueSOL = currentValueSOL + pos.solRecovered;
 const globalRoi = totalValueSOL / pos.buyAmountSOL;
-console.log("Position " + mint.slice(0,8) + "... ROI: " + (globalRoi * 100).toFixed(0) + "%");
+console.log("Position " + mint.slice(0,8) + "... ROI: " + (globalRoi * 100).toFixed(0) + "% | Valeur: " + currentValueSOL.toFixed(4) + " SOL");
 if (globalRoi <= POSITION_STOP_LOSS && !pos.halfSold) {
 console.log("Stop loss -50% sur " + mint.slice(0,8) + "... Vente totale");
 if (parseInt(currentTokenAmount) > 0) {
@@ -119,6 +136,17 @@ savePositions();
 }
 }
 } catch(e) { console.error("Take profit erreur:", e.message); }
+}
+
+async function monitorPositions() {
+console.log("Surveillance positions independante: 30s");
+setInterval(async () => {
+if (!isRunning) return;
+const mints = Object.keys(positions);
+if (mints.length === 0) return;
+console.log("Verification", mints.length, "position(s)...");
+for (const mint of mints) { await checkTakeProfit(mint); }
+}, 30000);
 }
 
 async function monitorWallet(walletAddress) {
@@ -153,8 +181,7 @@ if (positions[tradeInfo.mint].halfSold) {
 console.log("Rachat apres x2! 0.05 SOL sur " + tradeInfo.mint.slice(0,8) + "...");
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_REBUY * 1e9));
 if (txid) {
-const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
-const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
+const tokenAmount = await getTokenBalance(tradeInfo.mint);
 positions[tradeInfo.mint].tokenAmount = tokenAmount;
 positions[tradeInfo.mint].buyAmountSOL += TRADE_AMOUNT_REBUY;
 savePositions();
@@ -167,10 +194,10 @@ return;
 console.log("Signal! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.10 SOL");
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
 if (txid) {
-const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
-const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
+const tokenAmount = await getTokenBalance(tradeInfo.mint);
 positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT, tokenAmount: tokenAmount, solRecovered: 0, halfSold: false };
 savePositions();
+console.log("Position ouverte:", tradeInfo.mint.slice(0,8), "| Tokens:", tokenAmount);
 }
 }
 if (tradeInfo.action === "sell" && positions[tradeInfo.mint]) {
@@ -185,19 +212,19 @@ savePositions();
 }
 }
 }
-for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 } catch(e) { console.error("Erreur:", e.message); }
 }, 7000);
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v25");
+console.log("Bot demarre - Version finale v27");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL | Rebuy apres x2: 0.05 SOL | SL: -50% | TP: x2=70% | Retry: 3 | Check: 7s");
+console.log("Trade: 0.10 SOL | SL: -50% | TP: x2=70% | Retry: 3 | Check wallet: 7s | Check positions: 30s");
 console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius");
+await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
 }
