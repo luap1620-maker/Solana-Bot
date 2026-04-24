@@ -102,24 +102,14 @@ await swapToken(mint, SOL_MINT, currentTokenAmount);
 delete positions[mint];
 savePositions();
 }
-} else if (globalRoi >= 3 && !pos.bigSold) {
-console.log("Take profit 3x! Vente 80%");
-const amount80 = Math.floor(parseInt(currentTokenAmount) * 0.8).toString();
-const txid = await swapToken(mint, SOL_MINT, amount80);
-if (txid) {
-positions[mint].bigSold = true;
-positions[mint].solRecovered += currentValueSOL * 0.8;
-positions[mint].tokenAmount = Math.floor(parseInt(currentTokenAmount) * 0.2).toString();
-savePositions();
-}
 } else if (globalRoi >= 2 && !pos.halfSold) {
-console.log("Take profit 2x! Vente 60%");
-const amount60 = Math.floor(parseInt(currentTokenAmount) * 0.6).toString();
-const txid = await swapToken(mint, SOL_MINT, amount60);
+console.log("Take profit 2x! Vente 70%");
+const amount70 = Math.floor(parseInt(currentTokenAmount) * 0.7).toString();
+const txid = await swapToken(mint, SOL_MINT, amount70);
 if (txid) {
 positions[mint].halfSold = true;
-positions[mint].solRecovered += currentValueSOL * 0.6;
-positions[mint].tokenAmount = Math.floor(parseInt(currentTokenAmount) * 0.4).toString();
+positions[mint].solRecovered += currentValueSOL * 0.7;
+positions[mint].tokenAmount = Math.floor(parseInt(currentTokenAmount) * 0.3).toString();
 savePositions();
 }
 }
@@ -157,7 +147,7 @@ const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT *
 if (txid) {
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
 const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
-positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT, tokenAmount: tokenAmount, solRecovered: 0, halfSold: false, bigSold: false };
+positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT, tokenAmount: tokenAmount, solRecovered: 0, halfSold: false };
 savePositions();
 }
 }
@@ -179,12 +169,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v20");
+console.log("Bot demarre - Version finale v21");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL fixe | Min: 0.05 SOL | SL: -50% | TP: 2x=60% 3x=80% | Check: 10s");
+console.log("Trade: 0.10 SOL | Min: 0.05 SOL | SL: -50% | TP: x2=70% puis suit wallet | Check: 10s");
 console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
