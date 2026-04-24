@@ -8,6 +8,7 @@ const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + p
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
 const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk"];
 const TRADE_AMOUNT = 0.10;
+const TRADE_AMOUNT_REBUY = 0.05;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
 const POSITION_STOP_LOSS = 0.50;
@@ -145,9 +146,24 @@ if (tradeInfo.solAmount < MIN_TRADE_SOL) {
 console.log("Ignore - trop petit:", tradeInfo.solAmount.toFixed(4), "SOL");
 return;
 }
-if (positions[tradeInfo.mint]) { console.log("Position existante ignore"); return; }
 const tradable = await isTokenTradable(tradeInfo.mint);
 if (!tradable) return;
+if (positions[tradeInfo.mint]) {
+if (positions[tradeInfo.mint].halfSold) {
+console.log("Rachat apres x2! 0.05 SOL sur " + tradeInfo.mint.slice(0,8) + "...");
+const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_REBUY * 1e9));
+if (txid) {
+const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
+const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
+positions[tradeInfo.mint].tokenAmount = tokenAmount;
+positions[tradeInfo.mint].buyAmountSOL += TRADE_AMOUNT_REBUY;
+savePositions();
+}
+} else {
+console.log("Position existante ignore:", tradeInfo.mint.slice(0,8));
+}
+return;
+}
 console.log("Signal! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.10 SOL");
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
 if (txid) {
@@ -175,12 +191,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v23");
+console.log("Bot demarre - Version finale v24");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL | Min: 0.05 | SL: -50% | TP: x2=70% | Retry: 3 tentatives");
+console.log("Trade: 0.10 SOL | Rebuy apres x2: 0.05 SOL | SL: -50% | TP: x2=70% | Retry: 3");
 console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
