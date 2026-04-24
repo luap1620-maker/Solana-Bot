@@ -7,12 +7,13 @@ const fs = require("fs");
 const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
 const WALLETS_TO_TRACK = ["qNGhUruCGJpXJdsnV74USHErcbm3CrXRsnP8D6Z34Hh","EaVboaPxFCYanjoNWdkxTbPvt57nhXGu5i6m9m6ZS2kK","FRbUNvGxYNC1eFngpn7AD3f14aKKTJVC6zSMtvj2dyCS","suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK"];
-const TRADE_AMOUNT = 0.10;
-const TRADE_AMOUNT_REBUY = 0.05;
+const TRADE_AMOUNT = 0.05;
+const TRADE_AMOUNT_REBUY = 0.025;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
 const POSITION_STOP_LOSS = -0.40;
 const MIN_TRADE_SOL = 0.05;
+const MIN_LIQUIDITY_SOL = 3;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const POSITIONS_FILE = "positions.json";
 let startBalance = 0;
@@ -41,6 +42,16 @@ const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MI
 if (!quote || quote.error) { console.log("Token non tradable:", mint.slice(0,8)); return false; }
 return true;
 } catch(e) { return false; }
+}
+
+async function checkLiquidity(mint) {
+try {
+const res = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=1000000000&slippageBps=1000").then(r => r.json());
+if (!res || res.error) return 0;
+const priceImpact = parseFloat(res.priceImpactPct || 100);
+if (priceImpact > 5) { console.log("Liquidite insuffisante sur " + mint.slice(0,8) + " impact:" + priceImpact.toFixed(2) + "%"); return 0; }
+return MIN_LIQUIDITY_SOL + 1;
+} catch(e) { return 0; }
 }
 
 async function swapTokenWithRetry(inputMint, outputMint, amount, maxRetries = 3) {
@@ -176,9 +187,11 @@ return;
 }
 const tradable = await isTokenTradable(tradeInfo.mint);
 if (!tradable) return;
+const liquidity = await checkLiquidity(tradeInfo.mint);
+if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
 if (positions[tradeInfo.mint]) {
 if (positions[tradeInfo.mint].halfSold) {
-console.log("Rachat apres x2! 0.05 SOL sur " + tradeInfo.mint.slice(0,8) + "...");
+console.log("Rachat apres x2! 0.025 SOL sur " + tradeInfo.mint.slice(0,8) + "...");
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_REBUY * 1e9));
 if (txid) {
 const tokenAmount = await getTokenBalance(tradeInfo.mint);
@@ -191,7 +204,7 @@ console.log("Position existante ignore:", tradeInfo.mint.slice(0,8));
 }
 return;
 }
-console.log("Signal! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.10 SOL");
+console.log("Signal! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.05 SOL");
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
 if (txid) {
 const tokenAmount = await getTokenBalance(tradeInfo.mint);
@@ -217,12 +230,12 @@ savePositions();
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v30");
+console.log("Bot demarre - Version finale v31");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL | SL: -40% | TP: +100%=70% | Retry: 3 | Check wallet: 7s | Check positions: 30s");
+console.log("Trade: 0.05 SOL | Liquidite: 3 SOL | SL: -40% | TP: +100%=70% | Retry: 3 | Check: 7s/30s");
 console.log("Wallets tracked: 4 (dan100x, danny, henny, cupsey) | RPC: Helius");
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
