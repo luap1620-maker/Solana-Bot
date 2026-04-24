@@ -11,7 +11,7 @@ const TRADE_AMOUNT = 0.10;
 const TRADE_AMOUNT_REBUY = 0.05;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
-const POSITION_STOP_LOSS = 0.50;
+const POSITION_STOP_LOSS = -0.50;
 const MIN_TRADE_SOL = 0.05;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const POSITIONS_FILE = "positions.json";
@@ -115,7 +115,7 @@ const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + mint +
 if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
 const totalValueSOL = currentValueSOL + pos.solRecovered;
-const globalRoi = totalValueSOL / pos.buyAmountSOL;
+const globalRoi = (totalValueSOL - pos.buyAmountSOL) / pos.buyAmountSOL;
 console.log("Position " + mint.slice(0,8) + "... ROI: " + (globalRoi * 100).toFixed(0) + "% | Valeur: " + currentValueSOL.toFixed(4) + " SOL");
 if (globalRoi <= POSITION_STOP_LOSS && !pos.halfSold) {
 console.log("Stop loss -50% sur " + mint.slice(0,8) + "... Vente totale");
@@ -124,8 +124,8 @@ await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
 delete positions[mint];
 savePositions();
 }
-} else if (globalRoi >= 2 && !pos.halfSold) {
-console.log("Take profit 2x! Vente 70%");
+} else if (globalRoi >= 1 && !pos.halfSold) {
+console.log("Take profit x2! Vente 70%");
 const amount70 = Math.floor(parseInt(currentTokenAmount) * 0.7).toString();
 const txid = await swapTokenWithRetry(mint, SOL_MINT, amount70);
 if (txid) {
@@ -217,13 +217,13 @@ savePositions();
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v27");
+console.log("Bot demarre - Version finale v28");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL | SL: -50% | TP: x2=70% | Retry: 3 | Check wallet: 7s | Check positions: 30s");
-console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius");
+console.log("Trade: 0.10 SOL | SL: -50% | TP: +100%=70% | Retry: 3 | Check wallet: 7s | Check positions: 30s");
+console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius | ROI correct");
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
