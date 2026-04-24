@@ -187,16 +187,16 @@ savePositions();
 }
 for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 } catch(e) { console.error("Erreur:", e.message); }
-}, 10000);
+}, 7000);
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v24");
+console.log("Bot demarre - Version finale v25");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL | Rebuy apres x2: 0.05 SOL | SL: -50% | TP: x2=70% | Retry: 3");
+console.log("Trade: 0.10 SOL | Rebuy apres x2: 0.05 SOL | SL: -50% | TP: x2=70% | Retry: 3 | Check: 7s");
 console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
