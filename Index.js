@@ -6,7 +6,7 @@ const fs = require("fs");
 
 const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-const WALLETS_TO_TRACK = ["65paNEG8m7mCVoASVF2KbRdU21aKXdASSB9G3NjCSQuE","4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk"];
+const WALLETS_TO_TRACK = ["qNGhUruCGJpXJdsnV74USHErcbm3CrXRsnP8D6Z34Hh","EaVboaPxFCYanjoNWdkxTbPvt57nhXGu5i6m9m6ZS2kK","FRbUNvGxYNC1eFngpn7AD3f14aKKTJVC6zSMtvj2dyCS","suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK"];
 const TRADE_AMOUNT = 0.10;
 const TRADE_AMOUNT_REBUY = 0.05;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
@@ -217,13 +217,13 @@ savePositions();
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v29");
+console.log("Bot demarre - Version finale v30");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
 console.log("Trade: 0.10 SOL | SL: -40% | TP: +100%=70% | Retry: 3 | Check wallet: 7s | Check positions: 30s");
-console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius | ROI correct");
+console.log("Wallets tracked: 4 (dan100x, danny, henny, cupsey) | RPC: Helius");
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
