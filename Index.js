@@ -34,34 +34,38 @@ console.log("Positions chargees:", Object.keys(positions).length, "tokens");
 
 async function getBalance() { const b = await connection.getBalance(wallet.publicKey); return b / 1e9; }
 
-async function getDynamicSlippage(mint) {
+async function isTokenTradable(mint) {
 try {
-const res = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=150000000&slippageBps=1000").then(r => r.json());
-if (!res || res.error) return 500;
-const impact = parseFloat(res.priceImpactPct || 1);
-if (impact < 1) return 300;
-if (impact < 3) return 500;
-if (impact < 5) return 1000;
-return 1500;
-} catch(e) { return 500; }
+const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=100000000&slippageBps=2500").then(r => r.json());
+if (!quote || quote.error) { console.log("Token non tradable:", mint.slice(0,8)); return false; }
+return true;
+} catch(e) { return false; }
 }
 
-async function swapToken(inputMint, outputMint, amount) {
+async function swapTokenWithRetry(inputMint, outputMint, amount, maxRetries = 3) {
+const slippages = [500, 1000, 2500];
+for (let i = 0; i < maxRetries; i++) {
 try {
-const slippage = await getDynamicSlippage(outputMint === SOL_MINT ? inputMint : outputMint);
+const slippage = slippages[i] || 2500;
 const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + inputMint + "&outputMint=" + outputMint + "&amount=" + amount + "&slippageBps=" + slippage).then(r => r.json());
-if (!quote || quote.error) { console.log("Quote erreur:", quote); return; }
+if (!quote || quote.error) { console.log("Quote erreur tentative", i+1); continue; }
 const swapRes = await fetch("https://api.jup.ag/swap/v1/swap", {
 method: "POST", headers: {"Content-Type": "application/json"},
 body: JSON.stringify({quoteResponse: quote, userPublicKey: wallet.publicKey.toString(), wrapAndUnwrapSol: true})
 }).then(r => r.json());
-if (!swapRes.swapTransaction) { console.log("Swap erreur:", swapRes); return; }
+if (!swapRes.swapTransaction) { console.log("Swap erreur tentative", i+1); continue; }
 const swapTx = VersionedTransaction.deserialize(Buffer.from(swapRes.swapTransaction, "base64"));
 swapTx.sign([wallet]);
 const txid = await connection.sendRawTransaction(swapTx.serialize());
 console.log("Trade execute! TX:", txid);
 return txid;
-} catch(e) { console.error("Swap erreur:", e.message); }
+} catch(e) {
+console.log("Tentative", i+1, "echouee:", e.message);
+await new Promise(r => setTimeout(r, 2000));
+}
+}
+console.error("Swap echoue apres", maxRetries, "tentatives");
+return null;
 }
 
 async function analyzeTransaction(signature) {
@@ -94,18 +98,18 @@ if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
 const totalValueSOL = currentValueSOL + pos.solRecovered;
 const globalRoi = totalValueSOL / pos.buyAmountSOL;
-console.log("Position " + mint.slice(0,8) + "... ROI global: " + (globalRoi * 100).toFixed(0) + "% | Valeur: " + currentValueSOL.toFixed(4) + " SOL");
+console.log("Position " + mint.slice(0,8) + "... ROI: " + (globalRoi * 100).toFixed(0) + "%");
 if (globalRoi <= POSITION_STOP_LOSS && !pos.halfSold) {
-console.log("Stop loss position! -50% sur " + mint.slice(0,8) + "... Vente totale");
+console.log("Stop loss -50% sur " + mint.slice(0,8) + "... Vente totale");
 if (parseInt(currentTokenAmount) > 0) {
-await swapToken(mint, SOL_MINT, currentTokenAmount);
+await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
 delete positions[mint];
 savePositions();
 }
 } else if (globalRoi >= 2 && !pos.halfSold) {
 console.log("Take profit 2x! Vente 70%");
 const amount70 = Math.floor(parseInt(currentTokenAmount) * 0.7).toString();
-const txid = await swapToken(mint, SOL_MINT, amount70);
+const txid = await swapTokenWithRetry(mint, SOL_MINT, amount70);
 if (txid) {
 positions[mint].halfSold = true;
 positions[mint].solRecovered += currentValueSOL * 0.7;
@@ -138,12 +142,14 @@ const tradeInfo = await analyzeTransaction(sigs[0].signature);
 if (!tradeInfo) return;
 if (tradeInfo.action === "buy") {
 if (tradeInfo.solAmount < MIN_TRADE_SOL) {
-console.log("Ignore - trop petit:", tradeInfo.solAmount.toFixed(4), "SOL < 0.05 SOL");
+console.log("Ignore - trop petit:", tradeInfo.solAmount.toFixed(4), "SOL");
 return;
 }
-if (positions[tradeInfo.mint]) { console.log("Position existante sur " + tradeInfo.mint.slice(0,8) + "... ignore"); return; }
+if (positions[tradeInfo.mint]) { console.log("Position existante ignore"); return; }
+const tradable = await isTokenTradable(tradeInfo.mint);
+if (!tradable) return;
 console.log("Signal! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat 0.10 SOL");
-const txid = await swapToken(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
+const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
 if (txid) {
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
 const tokenAmount = tokenAccounts.value.length > 0 ? tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount : "0";
@@ -157,7 +163,7 @@ const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publ
 if (tokenAccounts.value.length > 0) {
 const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
 if (parseInt(tokenBalance) > 0) {
-await swapToken(tradeInfo.mint, SOL_MINT, tokenBalance);
+await swapTokenWithRetry(tradeInfo.mint, SOL_MINT, tokenBalance);
 delete positions[tradeInfo.mint];
 savePositions();
 }
@@ -169,12 +175,12 @@ for (const mint of Object.keys(positions)) { await checkTakeProfit(mint); }
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v21");
+console.log("Bot demarre - Version finale v23");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.10 SOL | Min: 0.05 SOL | SL: -50% | TP: x2=70% puis suit wallet | Check: 10s");
+console.log("Trade: 0.10 SOL | Min: 0.05 | SL: -50% | TP: x2=70% | Retry: 3 tentatives");
 console.log("Wallets tracked: 2 (jijo + PULL) | RPC: Helius");
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
