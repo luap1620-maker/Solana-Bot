@@ -6,7 +6,7 @@ const fs = require("fs");
 
 const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
-const WALLETS_TO_TRACK = ["4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk"];
+const WALLETS_TO_TRACK = ["3rwzJNVRrprfTQD3xFgxRK279tVAhNBtGtQk4WdP6Lu2","EVCwZrtPFudcjw69RZ9Qogt8dW2HjBp6EiMgv1ujdYuJ"];
 const TRADE_AMOUNT = 0.05;
 const TRADE_AMOUNT_REBUY = 0.025;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
@@ -15,7 +15,7 @@ const POSITION_STOP_LOSS = -0.40;
 const TRAILING_STOP = -0.20;
 const MIN_TRADE_SOL = 0.05;
 const MIN_LIQUIDITY_SOL = 3;
-const MIN_TOKEN_AGE_MINUTES = 10;
+const MIN_TOKEN_AGE_MINUTES = 4.5;
 const MAX_CREATOR_HOLDING = 0.30;
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 const POSITIONS_FILE = "positions.json";
@@ -54,7 +54,7 @@ if (!signatures.length) return false;
 const oldest = signatures[signatures.length - 1];
 const tokenAgeMinutes = (Date.now() - oldest.blockTime * 1000) / (1000 * 60);
 if (tokenAgeMinutes < MIN_TOKEN_AGE_MINUTES) {
-console.log("Token trop recent:", mint.slice(0,8), tokenAgeMinutes.toFixed(1), "min < 10 min");
+console.log("Token trop recent:", mint.slice(0,8), tokenAgeMinutes.toFixed(1), "min < 4.5 min");
 return false;
 }
 return true;
@@ -295,13 +295,13 @@ savePositions();
 }
 
 async function main() {
-console.log("Bot demarre - Version finale v32");
+console.log("Bot demarre - Version finale v33");
 console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log("Balance:", startBalance, "SOL");
-console.log("Trade: 0.05 SOL | Liquidite: 3 SOL | Age: 10min | Creator: <30% | SL: -40% | Trailing: -20% | TP: x2=70%");
-console.log("Wallets tracked: 1 (PULL) | RPC: Helius");
+console.log("Trade: 0.05 SOL | Liq: 3 SOL | Age: 4.5min | Creator: <30% | SL: -40% | Trailing: -20% | TP: x2=70%");
+console.log("Wallets tracked: 2 (Boru + ree) | RPC: Helius");
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log("Bot en ecoute...");
