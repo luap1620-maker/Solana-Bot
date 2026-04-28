@@ -106,11 +106,11 @@ return true;
 } catch(e) { return false; }
 }
 
-async function swapTokenWithRetry(inputMint, outputMint, amount, maxRetries = 3) {
-const slippages = [500, 1000, 2500];
+async function swapTokenWithRetry(inputMint, outputMint, amount, maxRetries = 2) {
+const slippages = [1000, 2500];
 for (let i = 0; i < maxRetries; i++) {
 try {
-const slippage = slippages[i] || 2500;
+const slippage = slippages[i];
 const quote = await fetch(“https://api.jup.ag/swap/v1/quote?inputMint=” + inputMint + “&outputMint=” + outputMint + “&amount=” + amount + “&slippageBps=” + slippage).then(r => r.json());
 if (!quote || quote.error) { console.log(“Quote erreur tentative”, i+1); continue; }
 const swapRes = await fetch(“https://api.jup.ag/swap/v1/swap”, {
@@ -194,19 +194,28 @@ savePositions();
 }
 const trailingStopLevel = (pos.highestRoi || 0) + TRAILING_STOP;
 console.log(“Position “ + mint.slice(0,8) + “… ROI: “ + (globalRoi * 100).toFixed(0) + “% | Max: “ + ((pos.highestRoi || 0) * 100).toFixed(0) + “% | Trailing: “ + (trailingStopLevel * 100).toFixed(0) + “%”);
+
+```
+// Stop loss -30% - aucune condition halfSold
 if (globalRoi <= POSITION_STOP_LOSS) {
-console.log(“Stop loss -30% sur “ + mint.slice(0,8) + “… Vente totale”);
-const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-if (txid) { delete positions[mint]; savePositions(); } else { console.log(“Stop loss echoue, reessai prochain cycle”); }
+  console.log("Stop loss -30% sur " + mint.slice(0,8) + "... Vente totale");
+  const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+  if (txid) { delete positions[mint]; savePositions(); } else { console.log("Stop loss echoue, reessai prochain cycle"); }
+
+// Trailing stop -15% depuis le max, seuil 40% - aucune condition halfSold
 } else if (pos.highestRoi >= TRAILING_THRESHOLD && globalRoi <= trailingStopLevel) {
-console.log(“Trailing stop! ROI “ + (globalRoi * 100).toFixed(0) + “% depuis max “ + ((pos.highestRoi || 0) * 100).toFixed(0) + “%”);
-const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-if (txid) { delete positions[mint]; savePositions(); } else { console.log(“Trailing stop echoue, reessai prochain cycle”); }
+  console.log("Trailing stop! ROI " + (globalRoi * 100).toFixed(0) + "% depuis max " + ((pos.highestRoi || 0) * 100).toFixed(0) + "%");
+  const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+  if (txid) { delete positions[mint]; savePositions(); } else { console.log("Trailing stop echoue, reessai prochain cycle"); }
+
+// Take profit vente totale a +60%
 } else if (globalRoi >= 0.60) {
-console.log(“Take profit +60%! Vente totale sur “ + mint.slice(0,8));
-const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-if (txid) { delete positions[mint]; savePositions(); } else { console.log(“Take profit echoue, reessai prochain cycle”); }
+  console.log("Take profit +60%! Vente totale sur " + mint.slice(0,8));
+  const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+  if (txid) { delete positions[mint]; savePositions(); } else { console.log("Take profit echoue, reessai prochain cycle"); }
 }
+```
+
 } catch(e) { console.error(“Take profit erreur:”, e.message); }
 }
 
@@ -248,8 +257,6 @@ console.log(“Position existante ignore:”, tradeInfo.mint.slice(0,8));
 return;
 }
 console.log(new Date().toISOString(), “Signal! “ + tradeInfo.solAmount.toFixed(3) + “ SOL de “ + walletAddress.slice(0,8) + “… -> achat “ + TRADE_AMOUNT + “ SOL”);
-const finalLiquidity = await checkLiquidity(tradeInfo.mint);
-if (finalLiquidity < MIN_LIQUIDITY_SOL) { console.log(“Liquidite disparue avant swap, annulation”); return; }
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
 if (txid) {
 const tokenAmount = await getTokenBalance(tradeInfo.mint);
@@ -295,7 +302,7 @@ await handleSignal(sig.signature, walletAddress);
 }
 
 async function main() {
-console.log(“Bot demarre - Version finale v35”);
+console.log(“Bot demarre - Version finale v36”);
 console.log(“Wallet:”, wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
