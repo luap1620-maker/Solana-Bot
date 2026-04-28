@@ -12,16 +12,14 @@ const WALLETS_TO_TRACK = [
 “J9TYAsWWidbrcZybmLSfrLzryANf4CgJBLdvwdGuC8MB”,
 “3BLjRcxWGtR7WRshJ3hL25U3RjWr5Ud98wMcczQqk4Ei”,
 “G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC”,
-“6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC”,
+“6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC”
 ];
-const TRADE_AMOUNT = 0.05;
-const TRADE_AMOUNT_REBUY = 0.025;
+const TRADE_AMOUNT = 0.03;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
 const POSITION_STOP_LOSS = -0.30;
 const TRAILING_STOP = -0.15;
 const TRAILING_THRESHOLD = 0.40;
-const MIN_TRADE_SOL = 0.05;
 const MIN_LIQUIDITY_SOL = 3;
 const MIN_TOKEN_AGE_MINUTES = 4.5;
 const MAX_CREATOR_HOLDING = 0.30;
@@ -119,7 +117,7 @@ const swapRes = await fetch(“https://api.jup.ag/swap/v1/swap”, {
 method: “POST”, headers: {“Content-Type”: “application/json”},
 body: JSON.stringify({quoteResponse: quote, userPublicKey: wallet.publicKey.toString(), wrapAndUnwrapSol: true})
 }).then(r => r.json());
-if (!swapRes.swapTransaction) { console.log(“Swap erreur tentative”, i+1); continue; }
+if (!swapRes.swapTransaction) { console.log(“Swap erreur tentative”, i+1, JSON.stringify(swapRes)); continue; }
 const swapTx = VersionedTransaction.deserialize(Buffer.from(swapRes.swapTransaction, “base64”));
 swapTx.sign([wallet]);
 const txid = await connection.sendRawTransaction(swapTx.serialize());
@@ -185,7 +183,7 @@ delete positions[mint];
 savePositions();
 return;
 }
-const quote = await fetch(“https://api.jup.ag/swap/v1/quote?inputMint=” + mint + “&outputMint=” + SOL_MINT + “&amount=” + currentTokenAmount + “&slippageBps=300”).then(r => r.json());
+const quote = await fetch(“https://api.jup.ag/swap/v1/quote?inputMint=” + mint + “&outputMint=” + SOL_MINT + “&amount=” + currentTokenAmount + “&slippageBps=1000”).then(r => r.json());
 if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
 const totalValueSOL = currentValueSOL + pos.solRecovered;
@@ -196,45 +194,31 @@ savePositions();
 }
 const trailingStopLevel = (pos.highestRoi || 0) + TRAILING_STOP;
 console.log(“Position “ + mint.slice(0,8) + “… ROI: “ + (globalRoi * 100).toFixed(0) + “% | Max: “ + ((pos.highestRoi || 0) * 100).toFixed(0) + “% | Trailing: “ + (trailingStopLevel * 100).toFixed(0) + “%”);
-
-```
-// Stop loss -30% — aucune condition halfSold
 if (globalRoi <= POSITION_STOP_LOSS) {
-  console.log("Stop loss -30% sur " + mint.slice(0,8) + "... Vente totale");
-  const txidSL = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-  if (txidSL) { delete positions[mint]; savePositions(); } else { console.log("Stop loss echoue, reessai prochain cycle"); }
-
-// Trailing stop -15% depuis le max, seuil 40% — aucune condition halfSold
+console.log(“Stop loss -30% sur “ + mint.slice(0,8) + “… Vente totale”);
+const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+if (txid) { delete positions[mint]; savePositions(); } else { console.log(“Stop loss echoue, reessai prochain cycle”); }
 } else if (pos.highestRoi >= TRAILING_THRESHOLD && globalRoi <= trailingStopLevel) {
-  console.log("Trailing stop! ROI " + (globalRoi * 100).toFixed(0) + "% depuis max " + ((pos.highestRoi || 0) * 100).toFixed(0) + "%");
-  const txidTS = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-  if (txidTS) { delete positions[mint]; savePositions(); } else { console.log("Trailing stop echoue, reessai prochain cycle"); }
-
-// Take profit vente totale a +60%
-} else if (globalRoi >= 0.60 && !pos.halfSold) {
-  console.log("Take profit +60%! Vente totale sur " + mint.slice(0,8));
-  const txidTP = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-  if (txidTP) {
-    delete positions[mint];
-    savePositions();
-  } else {
-    console.log("Take profit echoue, reessai prochain cycle");
-  }
+console.log(“Trailing stop! ROI “ + (globalRoi * 100).toFixed(0) + “% depuis max “ + ((pos.highestRoi || 0) * 100).toFixed(0) + “%”);
+const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+if (txid) { delete positions[mint]; savePositions(); } else { console.log(“Trailing stop echoue, reessai prochain cycle”); }
+} else if (globalRoi >= 0.60) {
+console.log(“Take profit +60%! Vente totale sur “ + mint.slice(0,8));
+const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+if (txid) { delete positions[mint]; savePositions(); } else { console.log(“Take profit echoue, reessai prochain cycle”); }
 }
-```
-
 } catch(e) { console.error(“Take profit erreur:”, e.message); }
 }
 
 async function monitorPositions() {
-console.log(“Surveillance positions independante: 30s”);
+console.log(“Surveillance positions independante: 15s”);
 setInterval(async () => {
 if (!isRunning) return;
 const mints = Object.keys(positions);
 if (mints.length === 0) return;
 console.log(“Verification”, mints.length, “position(s)…”);
 for (const mint of mints) { await checkTakeProfit(mint); }
-}, 30000);
+}, 15000);
 }
 
 async function handleSignal(sig, walletAddress) {
@@ -250,25 +234,26 @@ const tradeInfo = await analyzeTransaction(sig);
 if (!tradeInfo) return;
 if (tradeInfo.action === “buy”) {
 if (Object.keys(positions).length >= MAX_POSITIONS) { console.log(“Max positions atteint, ignore”); return; }
-if (tradeInfo.solAmount < 0.025) { console.log(“Ignore - trop petit:”, tradeInfo.solAmount.toFixed(4), “SOL”); return; }
+if (tradeInfo.solAmount < 0.02) { console.log(“Ignore - trop petit:”, tradeInfo.solAmount.toFixed(4), “SOL”); return; }
 const tradable = await isTokenTradable(tradeInfo.mint);
 if (!tradable) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
 if (liquidity < MIN_LIQUIDITY_SOL) { console.log(“Liquidite insuffisante, ignore”); return; }
+const ageOk = await checkTokenAge(tradeInfo.mint);
+if (!ageOk) return;
 const creatorOk = await checkCreatorHolding(tradeInfo.mint);
 if (!creatorOk) return;
 if (positions[tradeInfo.mint]) {
 console.log(“Position existante ignore:”, tradeInfo.mint.slice(0,8));
 return;
 }
-const buyAmount = tradeInfo.solAmount >= MIN_TRADE_SOL ? TRADE_AMOUNT : TRADE_AMOUNT_REBUY;
-console.log(new Date().toISOString(), “Signal! “ + tradeInfo.solAmount.toFixed(3) + “ SOL de “ + walletAddress.slice(0,8) + “… -> achat “ + buyAmount + “ SOL”);
+console.log(new Date().toISOString(), “Signal! “ + tradeInfo.solAmount.toFixed(3) + “ SOL de “ + walletAddress.slice(0,8) + “… -> achat “ + TRADE_AMOUNT + “ SOL”);
 const finalLiquidity = await checkLiquidity(tradeInfo.mint);
 if (finalLiquidity < MIN_LIQUIDITY_SOL) { console.log(“Liquidite disparue avant swap, annulation”); return; }
-const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(buyAmount * 1e9));
+const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
 if (txid) {
 const tokenAmount = await getTokenBalance(tradeInfo.mint);
-positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: buyAmount, tokenAmount: tokenAmount, solRecovered: 0, halfSold: false, highestRoi: 0 };
+positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT, tokenAmount: tokenAmount, solRecovered: 0, highestRoi: 0 };
 savePositions();
 console.log(“Position ouverte:”, tradeInfo.mint.slice(0,8), “| Tokens:”, tokenAmount);
 }
@@ -279,8 +264,8 @@ const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publ
 if (tokenAccounts.value.length > 0) {
 const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
 if (parseInt(tokenBalance) > 0) {
-const txidSell = await swapTokenWithRetry(tradeInfo.mint, SOL_MINT, tokenBalance);
-if (txidSell) { delete positions[tradeInfo.mint]; savePositions(); } else { console.log(“Vente detectee echouee, reessai prochain cycle”); }
+const txid = await swapTokenWithRetry(tradeInfo.mint, SOL_MINT, tokenBalance);
+if (txid) { delete positions[tradeInfo.mint]; savePositions(); } else { console.log(“Vente detectee echouee, reessai prochain cycle”); }
 }
 }
 }
@@ -315,7 +300,7 @@ console.log(“Wallet:”, wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log(“Balance:”, startBalance, “SOL”);
-console.log(“Trade: 0.05/0.025 SOL | Liq: 3 SOL | Age: 4.5min | Creator: <30% | SL: -30% | Trailing: -15% depuis max (seuil 40%) | TP: +60% vente totale | Max pos: 10”);
+console.log(“Trade: 0.03 SOL | Liq: 3 SOL | Age: 4.5min | Creator: <30% | SL: -30% | Trailing: -15% depuis max (seuil 40%) | TP: +60% vente totale | Max pos: 10”);
 console.log(“Wallets tracked: 6 (Boru + ree + Johnson + Sebastian + clukz + Nyhrox) | RPC: Helius”);
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
