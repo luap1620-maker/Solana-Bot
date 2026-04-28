@@ -10,13 +10,17 @@ const WALLETS_TO_TRACK = [
 “3rwzJNVRrprfTQD3xFgxRK279tVAhNBtGtQk4WdP6Lu2”,
 “EVCwZrtPFudcjw69RZ9Qogt8dW2HjBp6EiMgv1ujdYuJ”,
 “J9TYAsWWidbrcZybmLSfrLzryANf4CgJBLdvwdGuC8MB”,
-“4vw54BmAogeRV3vPKWyFet5yf8DTLcREzdSzx4rw9Ud9”
+“3BLjRcxWGtR7WRshJ3hL25U3RjWr5Ud98wMcczQqk4Ei”,
+“G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC”,
+“6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC”,
 ];
 const TRADE_AMOUNT = 0.05;
 const TRADE_AMOUNT_REBUY = 0.025;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
 const DAILY_TARGET = 50;
-const POSITION_STOP_LOSS = -0.40;
+const POSITION_STOP_LOSS = -0.30;
+const TRAILING_STOP = -0.15;
+const TRAILING_THRESHOLD = 0.40;
 const MIN_TRADE_SOL = 0.05;
 const MIN_LIQUIDITY_SOL = 3;
 const MIN_TOKEN_AGE_MINUTES = 4.5;
@@ -60,7 +64,7 @@ if (!signatures.length) return false;
 const oldest = signatures[signatures.length - 1];
 const tokenAgeMinutes = (Date.now() - oldest.blockTime * 1000) / (1000 * 60);
 if (tokenAgeMinutes < MIN_TOKEN_AGE_MINUTES) {
-console.log(“Token trop recent:”, mint.slice(0,8), tokenAgeMinutes.toFixed(1), “min < 4.5 min”);
+console.log(“Token trop recent:”, mint.slice(0,8), tokenAgeMinutes.toFixed(1), “min < “ + MIN_TOKEN_AGE_MINUTES + “ min”);
 return false;
 }
 return true;
@@ -190,30 +194,35 @@ if (globalRoi > (pos.highestRoi || 0)) {
 positions[mint].highestRoi = globalRoi;
 savePositions();
 }
-const trailingStop = (pos.highestRoi || 0) > 0.50 ? -0.20 : -0.15;
-const trailingStopLevel = (pos.highestRoi || 0) + trailingStop;
+const trailingStopLevel = (pos.highestRoi || 0) + TRAILING_STOP;
 console.log(“Position “ + mint.slice(0,8) + “… ROI: “ + (globalRoi * 100).toFixed(0) + “% | Max: “ + ((pos.highestRoi || 0) * 100).toFixed(0) + “% | Trailing: “ + (trailingStopLevel * 100).toFixed(0) + “%”);
-if (globalRoi <= POSITION_STOP_LOSS && !pos.halfSold) {
-console.log(“Stop loss -40% sur “ + mint.slice(0,8) + “… Vente totale”);
-await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-delete positions[mint];
-savePositions();
-} else if (pos.highestRoi > 0.275 && globalRoi <= trailingStopLevel && !pos.halfSold) {
-console.log(“Trailing stop! ROI “ + (globalRoi * 100).toFixed(0) + “% depuis max “ + ((pos.highestRoi || 0) * 100).toFixed(0) + “%”);
-await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-delete positions[mint];
-savePositions();
-} else if (globalRoi >= 1 && !pos.halfSold) {
-console.log(“Take profit x2! Vente 70%”);
-const amount70 = Math.floor(parseInt(currentTokenAmount) * 0.7).toString();
-const txid = await swapTokenWithRetry(mint, SOL_MINT, amount70);
-if (txid) {
-positions[mint].halfSold = true;
-positions[mint].solRecovered += currentValueSOL * 0.7;
-positions[mint].tokenAmount = Math.floor(parseInt(currentTokenAmount) * 0.3).toString();
-savePositions();
+
+```
+// Stop loss -30% — aucune condition halfSold
+if (globalRoi <= POSITION_STOP_LOSS) {
+  console.log("Stop loss -30% sur " + mint.slice(0,8) + "... Vente totale");
+  const txidSL = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+  if (txidSL) { delete positions[mint]; savePositions(); } else { console.log("Stop loss echoue, reessai prochain cycle"); }
+
+// Trailing stop -15% depuis le max, seuil 40% — aucune condition halfSold
+} else if (pos.highestRoi >= TRAILING_THRESHOLD && globalRoi <= trailingStopLevel) {
+  console.log("Trailing stop! ROI " + (globalRoi * 100).toFixed(0) + "% depuis max " + ((pos.highestRoi || 0) * 100).toFixed(0) + "%");
+  const txidTS = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+  if (txidTS) { delete positions[mint]; savePositions(); } else { console.log("Trailing stop echoue, reessai prochain cycle"); }
+
+// Take profit vente totale a +60%
+} else if (globalRoi >= 0.60 && !pos.halfSold) {
+  console.log("Take profit +60%! Vente totale sur " + mint.slice(0,8));
+  const txidTP = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+  if (txidTP) {
+    delete positions[mint];
+    savePositions();
+  } else {
+    console.log("Take profit echoue, reessai prochain cycle");
+  }
 }
-}
+```
+
 } catch(e) { console.error(“Take profit erreur:”, e.message); }
 }
 
@@ -246,27 +255,16 @@ const tradable = await isTokenTradable(tradeInfo.mint);
 if (!tradable) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
 if (liquidity < MIN_LIQUIDITY_SOL) { console.log(“Liquidite insuffisante, ignore”); return; }
-const ageOk = await checkTokenAge(tradeInfo.mint);
-if (!ageOk) return;
 const creatorOk = await checkCreatorHolding(tradeInfo.mint);
 if (!creatorOk) return;
 if (positions[tradeInfo.mint]) {
-if (positions[tradeInfo.mint].halfSold) {
-console.log(“Rachat apres x2! 0.025 SOL sur “ + tradeInfo.mint.slice(0,8) + “…”);
-const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT_REBUY * 1e9));
-if (txid) {
-const tokenAmount = await getTokenBalance(tradeInfo.mint);
-positions[tradeInfo.mint].tokenAmount = tokenAmount;
-positions[tradeInfo.mint].buyAmountSOL += TRADE_AMOUNT_REBUY;
-savePositions();
-}
-} else {
 console.log(“Position existante ignore:”, tradeInfo.mint.slice(0,8));
-}
 return;
 }
 const buyAmount = tradeInfo.solAmount >= MIN_TRADE_SOL ? TRADE_AMOUNT : TRADE_AMOUNT_REBUY;
 console.log(new Date().toISOString(), “Signal! “ + tradeInfo.solAmount.toFixed(3) + “ SOL de “ + walletAddress.slice(0,8) + “… -> achat “ + buyAmount + “ SOL”);
+const finalLiquidity = await checkLiquidity(tradeInfo.mint);
+if (finalLiquidity < MIN_LIQUIDITY_SOL) { console.log(“Liquidite disparue avant swap, annulation”); return; }
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(buyAmount * 1e9));
 if (txid) {
 const tokenAmount = await getTokenBalance(tradeInfo.mint);
@@ -281,9 +279,8 @@ const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publ
 if (tokenAccounts.value.length > 0) {
 const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
 if (parseInt(tokenBalance) > 0) {
-await swapTokenWithRetry(tradeInfo.mint, SOL_MINT, tokenBalance);
-delete positions[tradeInfo.mint];
-savePositions();
+const txidSell = await swapTokenWithRetry(tradeInfo.mint, SOL_MINT, tokenBalance);
+if (txidSell) { delete positions[tradeInfo.mint]; savePositions(); } else { console.log(“Vente detectee echouee, reessai prochain cycle”); }
 }
 }
 }
@@ -309,17 +306,17 @@ for (const sig of newSigs.reverse()) {
 await handleSignal(sig.signature, walletAddress);
 }
 } catch(e) { console.error(“Erreur:”, e.message); }
-}, 7000);
+}, 15000);
 }
 
 async function main() {
-console.log(“Bot demarre - Version finale v34”);
+console.log(“Bot demarre - Version finale v35”);
 console.log(“Wallet:”, wallet.publicKey.toString());
 loadPositions();
 startBalance = await getBalance();
 console.log(“Balance:”, startBalance, “SOL”);
-console.log(“Trade: 0.05 SOL | Liq: 3 SOL | Age: 4.5min | Creator: <30% | SL: -40% | Trailing: 27.5% seuil | -15% si max<50% | -20% si max>50% | TP: x2=70% | Max pos: 10”);
-console.log(“Wallets tracked: 4 (Boru + ree + Johnson + decu) | RPC: Helius”);
+console.log(“Trade: 0.05/0.025 SOL | Liq: 3 SOL | Age: 4.5min | Creator: <30% | SL: -30% | Trailing: -15% depuis max (seuil 40%) | TP: +60% vente totale | Max pos: 10”);
+console.log(“Wallets tracked: 6 (Boru + ree + Johnson + Sebastian + clukz + Nyhrox) | RPC: Helius”);
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
 console.log(“Bot en ecoute…”);
