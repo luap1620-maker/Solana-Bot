@@ -1,18 +1,18 @@
-require(“dotenv”).config();
-const { Connection, PublicKey, Keypair, VersionedTransaction } = require(”@solana/web3.js”);
-const bs58 = require(“bs58”);
-const fetch = require(“node-fetch”);
-const fs = require(“fs”);
+require("dotenv").config();
+const { Connection, PublicKey, Keypair, VersionedTransaction } = require("@solana/web3.js");
+const bs58 = require("bs58");
+const fetch = require("node-fetch");
+const fs = require("fs");
 
-const connection = new Connection(“https://mainnet.helius-rpc.com/?api-key=” + process.env.HELIUS_API_KEY, “confirmed”);
+const connection = new Connection("https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY, "confirmed");
 const wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
 const WALLETS_TO_TRACK = [
-“3rwzJNVRrprfTQD3xFgxRK279tVAhNBtGtQk4WdP6Lu2”,
-“EVCwZrtPFudcjw69RZ9Qogt8dW2HjBp6EiMgv1ujdYuJ”,
-“J9TYAsWWidbrcZybmLSfrLzryANf4CgJBLdvwdGuC8MB”,
-“3BLjRcxWGtR7WRshJ3hL25U3RjWr5Ud98wMcczQqk4Ei”,
-“G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC”,
-“6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC”
+"3rwzJNVRrprfTQD3xFgxRK279tVAhNBtGtQk4WdP6Lu2",
+"EVCwZrtPFudcjw69RZ9Qogt8dW2HjBp6EiMgv1ujdYuJ",
+"J9TYAsWWidbrcZybmLSfrLzryANf4CgJBLdvwdGuC8MB",
+"3BLjRcxWGtR7WRshJ3hL25U3RjWr5Ud98wMcczQqk4Ei",
+"G6fUXjMKPJzCY1rveAE6Qm7wy5U3vZgKDJmN1VPAdiZC",
+"6S8GezkxYUfZy9JPtYnanbcZTMB87Wjt1qx3c6ELajKC"
 ];
 const TRADE_AMOUNT = 0.03;
 const MAX_LOSS = parseFloat(process.env.MAX_LOSS_PERCENT) || 20;
@@ -24,33 +24,50 @@ const MIN_LIQUIDITY_SOL = 3;
 const MIN_TOKEN_AGE_MINUTES = 4.5;
 const MAX_CREATOR_HOLDING = 0.30;
 const MAX_POSITIONS = 10;
-const SOL_MINT = “So11111111111111111111111111111111111111112”;
-const POSITIONS_FILE = “positions.json”;
-const SIG_FILE = “/root/solana-bot/lastsigs.json”;
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+const POSITIONS_FILE = "positions.json";
+const BLACKLIST_FILE = "blacklist.json";
+const SIG_FILE = "/root/solana-bot/lastsigs.json";
 let startBalance = 0;
 let isRunning = true;
 let positions = {};
+let blacklist = {};
 let processedSigs = {};
 
 function savePositions() {
-try { fs.writeFileSync(POSITIONS_FILE, JSON.stringify(positions)); } catch(e) { console.error(“Erreur save positions:”, e.message); }
+try { fs.writeFileSync(POSITIONS_FILE, JSON.stringify(positions)); } catch(e) { console.error("Erreur save positions:", e.message); }
 }
 
 function loadPositions() {
 try {
 if (fs.existsSync(POSITIONS_FILE)) {
 positions = JSON.parse(fs.readFileSync(POSITIONS_FILE));
-console.log(“Positions chargees:”, Object.keys(positions).length, “tokens”);
+console.log("Positions chargees:", Object.keys(positions).length, "tokens");
 for (const mint of Object.keys(positions)) {
 if (!positions[mint].highestRoi) positions[mint].highestRoi = 0;
 if (!positions[mint].buyAmountSOL || positions[mint].buyAmountSOL === 0) {
-console.log(“Position invalide supprimee:”, mint.slice(0,8));
+console.log("Position invalide supprimee:", mint.slice(0,8));
 delete positions[mint];
 }
 }
 savePositions();
 }
-} catch(e) { console.error(“Erreur load positions:”, e.message); positions = {}; }
+} catch(e) { console.error("Erreur load positions:", e.message); positions = {}; }
+}
+
+function loadBlacklist() {
+try {
+if (fs.existsSync(BLACKLIST_FILE)) {
+blacklist = JSON.parse(fs.readFileSync(BLACKLIST_FILE));
+console.log("Blacklist chargee:", Object.keys(blacklist).length, "tokens");
+}
+} catch(e) { blacklist = {}; }
+}
+
+function addToBlacklist(mint, reason) {
+blacklist[mint] = { reason: reason, date: Date.now() };
+try { fs.writeFileSync(BLACKLIST_FILE, JSON.stringify(blacklist)); } catch(e) {}
+console.log("Token blackliste:", mint.slice(0,8), "raison:", reason);
 }
 
 async function getBalance() { const b = await connection.getBalance(wallet.publicKey); return b / 1e9; }
@@ -62,7 +79,7 @@ if (!signatures.length) return false;
 const oldest = signatures[signatures.length - 1];
 const tokenAgeMinutes = (Date.now() - oldest.blockTime * 1000) / (1000 * 60);
 if (tokenAgeMinutes < MIN_TOKEN_AGE_MINUTES) {
-console.log(“Token trop recent:”, mint.slice(0,8), tokenAgeMinutes.toFixed(1), “min < “ + MIN_TOKEN_AGE_MINUTES + “ min”);
+console.log("Token trop recent:", mint.slice(0,8), tokenAgeMinutes.toFixed(1), "min < " + MIN_TOKEN_AGE_MINUTES + " min");
 return false;
 }
 return true;
@@ -81,7 +98,7 @@ if (!largestAccounts.value.length) return true;
 const largest = largestAccounts.value[0];
 const holdingPct = largest.uiAmount / (parseInt(supply) / Math.pow(10, decimals));
 if (holdingPct > MAX_CREATOR_HOLDING) {
-console.log(“Detention trop elevee:”, mint.slice(0,8), (holdingPct * 100).toFixed(0) + “% > 30%”);
+console.log("Detention trop elevee:", mint.slice(0,8), (holdingPct * 100).toFixed(0) + "% > 30%");
 return false;
 }
 return true;
@@ -90,18 +107,18 @@ return true;
 
 async function checkLiquidity(mint) {
 try {
-const res = await fetch(“https://api.jup.ag/swap/v1/quote?inputMint=” + SOL_MINT + “&outputMint=” + mint + “&amount=1000000000&slippageBps=1000”).then(r => r.json());
+const res = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=30000000&slippageBps=1000").then(r => r.json());
 if (!res || res.error) return 0;
 const priceImpact = parseFloat(res.priceImpactPct || 100);
-if (priceImpact > 5) { console.log(“Liquidite insuffisante:”, mint.slice(0,8), “impact:” + priceImpact.toFixed(2) + “%”); return 0; }
+if (priceImpact > 10) { console.log("Liquidite insuffisante:", mint.slice(0,8), "impact:" + priceImpact.toFixed(2) + "%"); return 0; }
 return MIN_LIQUIDITY_SOL + 1;
 } catch(e) { return 0; }
 }
 
 async function isTokenTradable(mint) {
 try {
-const quote = await fetch(“https://api.jup.ag/swap/v1/quote?inputMint=” + SOL_MINT + “&outputMint=” + mint + “&amount=100000000&slippageBps=2500”).then(r => r.json());
-if (!quote || quote.error) { console.log(“Token non tradable:”, mint.slice(0,8)); return false; }
+const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + SOL_MINT + "&outputMint=" + mint + "&amount=30000000&slippageBps=2500").then(r => r.json());
+if (!quote || quote.error) { console.log("Token non tradable:", mint.slice(0,8)); return false; }
 return true;
 } catch(e) { return false; }
 }
@@ -111,24 +128,24 @@ const slippages = [1000, 2500];
 for (let i = 0; i < maxRetries; i++) {
 try {
 const slippage = slippages[i];
-const quote = await fetch(“https://api.jup.ag/swap/v1/quote?inputMint=” + inputMint + “&outputMint=” + outputMint + “&amount=” + amount + “&slippageBps=” + slippage).then(r => r.json());
-if (!quote || quote.error) { console.log(“Quote erreur tentative”, i+1); continue; }
-const swapRes = await fetch(“https://api.jup.ag/swap/v1/swap”, {
-method: “POST”, headers: {“Content-Type”: “application/json”},
+const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + inputMint + "&outputMint=" + outputMint + "&amount=" + amount + "&slippageBps=" + slippage).then(r => r.json());
+if (!quote || quote.error) { console.log("Quote erreur tentative", i+1); continue; }
+const swapRes = await fetch("https://api.jup.ag/swap/v1/swap", {
+method: "POST", headers: {"Content-Type": "application/json"},
 body: JSON.stringify({quoteResponse: quote, userPublicKey: wallet.publicKey.toString(), wrapAndUnwrapSol: true})
 }).then(r => r.json());
-if (!swapRes.swapTransaction) { console.log(“Swap erreur tentative”, i+1, JSON.stringify(swapRes)); continue; }
-const swapTx = VersionedTransaction.deserialize(Buffer.from(swapRes.swapTransaction, “base64”));
+if (!swapRes.swapTransaction) { console.log("Swap erreur tentative", i+1, JSON.stringify(swapRes)); continue; }
+const swapTx = VersionedTransaction.deserialize(Buffer.from(swapRes.swapTransaction, "base64"));
 swapTx.sign([wallet]);
 const txid = await connection.sendRawTransaction(swapTx.serialize());
-console.log(“Trade execute! TX:”, txid);
+console.log("Trade execute! TX:", txid);
 return txid;
 } catch(e) {
-console.log(“Tentative”, i+1, “echouee:”, e.message);
+console.log("Tentative", i+1, "echouee:", e.message);
 await new Promise(r => setTimeout(r, 2000));
 }
 }
-console.error(“Swap echoue apres”, maxRetries, “tentatives”);
+console.error("Swap echoue apres", maxRetries, "tentatives");
 return null;
 }
 
@@ -143,11 +160,11 @@ for (const post of postBalances) {
 const pre = preBalances.find(p => p.mint === post.mint && p.accountIndex === post.accountIndex);
 const preAmount = pre ? parseFloat(pre.uiTokenAmount.uiAmount || 0) : 0;
 const postAmount = parseFloat(post.uiTokenAmount.uiAmount || 0);
-if (postAmount > preAmount && post.mint !== SOL_MINT) { return { action: “buy”, mint: post.mint, solAmount: Math.abs(solSpent) }; }
-if (postAmount < preAmount && post.mint !== SOL_MINT) { return { action: “sell”, mint: post.mint, solAmount: 0 }; }
+if (postAmount > preAmount && post.mint !== SOL_MINT) { return { action: "buy", mint: post.mint, solAmount: Math.abs(solSpent) }; }
+if (postAmount < preAmount && post.mint !== SOL_MINT) { return { action: "sell", mint: post.mint, solAmount: 0 }; }
 }
 return null;
-} catch(e) { console.error(“Analyse erreur:”, e.message); return null; }
+} catch(e) { console.error("Analyse erreur:", e.message); return null; }
 }
 
 async function getTokenBalance(mint, retries = 5) {
@@ -159,9 +176,9 @@ if (tokenAccounts.value.length > 0) {
 const amount = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
 if (parseInt(amount) > 0) return amount;
 }
-} catch(e) { console.log(“Retry getTokenBalance”, i+1); }
+} catch(e) { console.log("Retry getTokenBalance", i+1); }
 }
-return “0”;
+return "0";
 }
 
 async function checkTakeProfit(mint) {
@@ -169,7 +186,7 @@ try {
 if (!positions[mint]) return;
 const pos = positions[mint];
 if (!pos.buyAmountSOL || pos.buyAmountSOL === 0) {
-console.log(“Position invalide supprimee:”, mint.slice(0,8));
+console.log("Position invalide supprimee:", mint.slice(0,8));
 delete positions[mint];
 savePositions();
 return;
@@ -178,12 +195,12 @@ const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publ
 if (!tokenAccounts.value.length) return;
 const currentTokenAmount = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
 if (parseInt(currentTokenAmount) === 0) {
-console.log(“Position “ + mint.slice(0,8) + “… solde 0 - suppression”);
+console.log("Position " + mint.slice(0,8) + "... solde 0 - suppression");
 delete positions[mint];
 savePositions();
 return;
 }
-const quote = await fetch(“https://api.jup.ag/swap/v1/quote?inputMint=” + mint + “&outputMint=” + SOL_MINT + “&amount=” + currentTokenAmount + “&slippageBps=1000”).then(r => r.json());
+const quote = await fetch("https://api.jup.ag/swap/v1/quote?inputMint=" + mint + "&outputMint=" + SOL_MINT + "&amount=" + currentTokenAmount + "&slippageBps=1000").then(r => r.json());
 if (!quote || quote.error) return;
 const currentValueSOL = parseInt(quote.outAmount) / 1e9;
 const totalValueSOL = currentValueSOL + pos.solRecovered;
@@ -193,41 +210,47 @@ positions[mint].highestRoi = globalRoi;
 savePositions();
 }
 const trailingStopLevel = (pos.highestRoi || 0) + TRAILING_STOP;
-console.log(“Position “ + mint.slice(0,8) + “… ROI: “ + (globalRoi * 100).toFixed(0) + “% | Max: “ + ((pos.highestRoi || 0) * 100).toFixed(0) + “% | Trailing: “ + (trailingStopLevel * 100).toFixed(0) + “%”);
+console.log("Position " + mint.slice(0,8) + "... ROI: " + (globalRoi * 100).toFixed(0) + "% | Max: " + ((pos.highestRoi || 0) * 100).toFixed(0) + "% | Trailing: " + (trailingStopLevel * 100).toFixed(0) + "%");
 
-```
-// Stop loss -30% - aucune condition halfSold
 if (globalRoi <= POSITION_STOP_LOSS) {
-  console.log("Stop loss -30% sur " + mint.slice(0,8) + "... Vente totale");
-  const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-  if (txid) { delete positions[mint]; savePositions(); } else { console.log("Stop loss echoue, reessai prochain cycle"); }
+console.log("Stop loss -30% sur " + mint.slice(0,8) + "... Vente totale");
+const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+if (txid) {
+addToBlacklist(mint, "stop_loss");
+delete positions[mint];
+savePositions();
+} else { console.log("Stop loss echoue, reessai prochain cycle"); }
 
-// Trailing stop -15% depuis le max, seuil 40% - aucune condition halfSold
 } else if (pos.highestRoi >= TRAILING_THRESHOLD && globalRoi <= trailingStopLevel) {
-  console.log("Trailing stop! ROI " + (globalRoi * 100).toFixed(0) + "% depuis max " + ((pos.highestRoi || 0) * 100).toFixed(0) + "%");
-  const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-  if (txid) { delete positions[mint]; savePositions(); } else { console.log("Trailing stop echoue, reessai prochain cycle"); }
+console.log("Trailing stop! ROI " + (globalRoi * 100).toFixed(0) + "% depuis max " + ((pos.highestRoi || 0) * 100).toFixed(0) + "%");
+const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+if (txid) {
+addToBlacklist(mint, "trailing_stop");
+delete positions[mint];
+savePositions();
+} else { console.log("Trailing stop echoue, reessai prochain cycle"); }
 
-// Take profit vente totale a +60%
 } else if (globalRoi >= 0.60) {
-  console.log("Take profit +60%! Vente totale sur " + mint.slice(0,8));
-  const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
-  if (txid) { delete positions[mint]; savePositions(); } else { console.log("Take profit echoue, reessai prochain cycle"); }
+console.log("Take profit +60%! Vente totale sur " + mint.slice(0,8));
+const txid = await swapTokenWithRetry(mint, SOL_MINT, currentTokenAmount);
+if (txid) {
+delete positions[mint];
+savePositions();
+} else { console.log("Take profit echoue, reessai prochain cycle"); }
 }
-```
 
-} catch(e) { console.error(“Take profit erreur:”, e.message); }
+} catch(e) { console.error("Take profit erreur:", e.message); }
 }
 
 async function monitorPositions() {
-console.log(“Surveillance positions independante: 15s”);
+console.log("Surveillance positions independante: 30s");
 setInterval(async () => {
 if (!isRunning) return;
 const mints = Object.keys(positions);
 if (mints.length === 0) return;
-console.log(“Verification”, mints.length, “position(s)…”);
+console.log("Verification", mints.length, "position(s)...");
 for (const mint of mints) { await checkTakeProfit(mint); }
-}, 15000);
+}, 30000);
 }
 
 async function handleSignal(sig, walletAddress) {
@@ -236,50 +259,54 @@ processedSigs[sig] = true;
 const balance = await getBalance();
 if (startBalance > 0) {
 const pnl = ((balance - startBalance) / startBalance) * 100;
-if (pnl <= -MAX_LOSS) { console.log(“Stop loss global!”, pnl.toFixed(2) + “%”); isRunning = false; return; }
-if (pnl >= DAILY_TARGET) { console.log(“Objectif journalier atteint!”, pnl.toFixed(2) + “%”); isRunning = false; return; }
+if (pnl <= -MAX_LOSS) { console.log("Stop loss global!", pnl.toFixed(2) + "%"); isRunning = false; return; }
+if (pnl >= DAILY_TARGET) { console.log("Objectif journalier atteint!", pnl.toFixed(2) + "%"); isRunning = false; return; }
 }
 const tradeInfo = await analyzeTransaction(sig);
 if (!tradeInfo) return;
-if (tradeInfo.action === “buy”) {
-if (Object.keys(positions).length >= MAX_POSITIONS) { console.log(“Max positions atteint, ignore”); return; }
-if (tradeInfo.solAmount < 0.02) { console.log(“Ignore - trop petit:”, tradeInfo.solAmount.toFixed(4), “SOL”); return; }
+if (tradeInfo.action === "buy") {
+if (Object.keys(positions).length >= MAX_POSITIONS) { console.log("Max positions atteint, ignore"); return; }
+if (tradeInfo.solAmount < 0.02) { console.log("Ignore - trop petit:", tradeInfo.solAmount.toFixed(4), "SOL"); return; }
+if (blacklist[tradeInfo.mint]) {
+console.log("Token blackliste, ignore:", tradeInfo.mint.slice(0,8), "raison:", blacklist[tradeInfo.mint].reason);
+return;
+}
 const tradable = await isTokenTradable(tradeInfo.mint);
 if (!tradable) return;
 const liquidity = await checkLiquidity(tradeInfo.mint);
-if (liquidity < MIN_LIQUIDITY_SOL) { console.log(“Liquidite insuffisante, ignore”); return; }
+if (liquidity < MIN_LIQUIDITY_SOL) { console.log("Liquidite insuffisante, ignore"); return; }
 const ageOk = await checkTokenAge(tradeInfo.mint);
 if (!ageOk) return;
 const creatorOk = await checkCreatorHolding(tradeInfo.mint);
 if (!creatorOk) return;
 if (positions[tradeInfo.mint]) {
-console.log(“Position existante ignore:”, tradeInfo.mint.slice(0,8));
+console.log("Position existante ignore:", tradeInfo.mint.slice(0,8));
 return;
 }
-console.log(new Date().toISOString(), “Signal! “ + tradeInfo.solAmount.toFixed(3) + “ SOL de “ + walletAddress.slice(0,8) + “… -> achat “ + TRADE_AMOUNT + “ SOL”);
+console.log(new Date().toISOString(), "Signal! " + tradeInfo.solAmount.toFixed(3) + " SOL de " + walletAddress.slice(0,8) + "... -> achat " + TRADE_AMOUNT + " SOL");
 const txid = await swapTokenWithRetry(SOL_MINT, tradeInfo.mint, Math.floor(TRADE_AMOUNT * 1e9));
 if (txid) {
 const tokenAmount = await getTokenBalance(tradeInfo.mint);
 positions[tradeInfo.mint] = { buyTx: txid, buyTime: Date.now(), buyAmountSOL: TRADE_AMOUNT, tokenAmount: tokenAmount, solRecovered: 0, highestRoi: 0 };
 savePositions();
-console.log(“Position ouverte:”, tradeInfo.mint.slice(0,8), “| Tokens:”, tokenAmount);
+console.log("Position ouverte:", tradeInfo.mint.slice(0,8), "| Tokens:", tokenAmount);
 }
 }
-if (tradeInfo.action === “sell” && positions[tradeInfo.mint]) {
-console.log(“Vente detectee sur “ + walletAddress.slice(0,8) + “… -> vente position”);
+if (tradeInfo.action === "sell" && positions[tradeInfo.mint]) {
+console.log("Vente detectee sur " + walletAddress.slice(0,8) + "... -> vente position");
 const tokenAccounts = await connection.getParsedTokenAccountsByOwner(wallet.publicKey, {mint: new PublicKey(tradeInfo.mint)});
 if (tokenAccounts.value.length > 0) {
 const tokenBalance = tokenAccounts.value[0].account.data.parsed.info.tokenAmount.amount;
 if (parseInt(tokenBalance) > 0) {
 const txid = await swapTokenWithRetry(tradeInfo.mint, SOL_MINT, tokenBalance);
-if (txid) { delete positions[tradeInfo.mint]; savePositions(); } else { console.log(“Vente detectee echouee, reessai prochain cycle”); }
+if (txid) { delete positions[tradeInfo.mint]; savePositions(); } else { console.log("Vente detectee echouee, reessai prochain cycle"); }
 }
 }
 }
 }
 
 async function monitorWallet(walletAddress) {
-console.log(“Monitoring:”, walletAddress);
+console.log("Monitoring:", walletAddress);
 const pubkey = new PublicKey(walletAddress);
 let allSigs = {};
 try { allSigs = JSON.parse(fs.readFileSync(SIG_FILE)); } catch(e) {}
@@ -297,21 +324,22 @@ fs.writeFileSync(SIG_FILE, JSON.stringify(allSigs));
 for (const sig of newSigs.reverse()) {
 await handleSignal(sig.signature, walletAddress);
 }
-} catch(e) { console.error(“Erreur:”, e.message); }
-}, 15000);
+} catch(e) { console.error("Erreur:", e.message); }
+}, 10000);
 }
 
 async function main() {
-console.log(“Bot demarre - Version finale v36”);
-console.log(“Wallet:”, wallet.publicKey.toString());
+console.log("Bot demarre - Version finale v37");
+console.log("Wallet:", wallet.publicKey.toString());
 loadPositions();
+loadBlacklist();
 startBalance = await getBalance();
-console.log(“Balance:”, startBalance, “SOL”);
-console.log(“Trade: 0.03 SOL | Liq: 3 SOL | Age: 4.5min | Creator: <30% | SL: -30% | Trailing: -15% depuis max (seuil 40%) | TP: +60% vente totale | Max pos: 10”);
-console.log(“Wallets tracked: 6 (Boru + ree + Johnson + Sebastian + clukz + Nyhrox) | RPC: Helius”);
+console.log("Balance:", startBalance, "SOL");
+console.log("Trade: 0.03 SOL | Liq: 3 SOL | Age: 4.5min | Creator: <30% | SL: -30% | Trailing: -15% seuil 40% | TP: +60% | Blacklist: SL+Trailing | Max pos: 10");
+console.log("Wallets tracked: 6 (Boru + ree + Johnson + Sebastian + clukz + Nyhrox) | RPC: Helius");
 await monitorPositions();
 for (const w of WALLETS_TO_TRACK) { await monitorWallet(w); }
-console.log(“Bot en ecoute…”);
+console.log("Bot en ecoute...");
 }
 
 main().catch(console.error);
